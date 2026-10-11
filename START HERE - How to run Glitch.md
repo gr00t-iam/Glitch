@@ -11,6 +11,10 @@ Glitch is a Windows desktop AI companion. Give it a task in plain language, watc
 5. Open **Settings & connections > Model Manager**. Paste a public Hugging Face URL ending in `.gguf`, click **Download model**, then select the downloaded file and click **Load model**. You can also **Import GGUF file** from your PC. Keep **Supervision > Execution mode** on **Worker only** for local use.
 6. Ask Glitch to inspect your project. Review the timeline and any approval request.
 
+Context length accepts up to 131,072 tokens, including 65,535, subject to model support and available RAM. **Save settings** closes the settings window after saving successfully.
+
+For unattended actions, turn on **Computer & safety > Full Access** and save. It skips individual prompts for supported tools, including authorized Discord tasks, and stays on after restart. The amber header badge shows when it is active. Turn it off to restore prompts. Workspace boundaries, protected files, command allowlists and Stop remain enforced; Full Access does not grant administrator rights.
+
 The repository's **Start Glitch.cmd** is an optional shortcut: it opens the packaged executable beside it or in `dist/`. If no executable exists, it opens the release download page. It does not start a server or install dependencies.
 
 ## Optional connections

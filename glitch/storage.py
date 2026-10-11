@@ -23,7 +23,7 @@ DEFAULTS = {
     'temperature': 0.15, 'vision_projector': '',
     'supervisor_auth': 'api', 'supervisor_provider': 'openrouter',
     'proxy_url': 'http://127.0.0.1:8317/v1', 'proxy_login_url': 'http://127.0.0.1:8317',
-    'proxy_model': '',
+    'proxy_model': '', 'full_access': False,
 }
 
 
@@ -153,8 +153,10 @@ class Store:
         values['context_length'] = int(values['context_length'])
         values['cpu_threads'] = int(values['cpu_threads'])
         values['temperature'] = float(values['temperature'])
-        if not 1024 <= values['context_length'] <= 32768:
-            raise ValueError('Context length must be between 1024 and 32768 tokens.')
+        if not 1024 <= values['context_length'] <= 131072:
+            raise ValueError('Context length must be between 1024 and 131072 tokens.')
+        if type(values['full_access']) is not bool:
+            raise ValueError('Full Access must be explicitly on or off.')
         if not 1 <= values['cpu_threads'] <= 128 or not 0 <= values['temperature'] <= 2:
             raise ValueError('Use 1-128 CPU threads and a temperature between 0 and 2.')
         for name in ('ollama_url', 'supervisor_url'):

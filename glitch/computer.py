@@ -14,14 +14,14 @@ from urllib.parse import urlsplit
 import requests
 
 COMPUTER_SCHEMAS = [
-    {'name': 'desktop_screenshot', 'description': 'Capture the primary desktop after approval. Returns a PNG for a vision-capable worker.',
+    {'name': 'desktop_screenshot', 'description': 'Capture the primary desktop under the selected action permissions. Returns a PNG for a vision-capable worker.',
      'parameters': {'type': 'object', 'additionalProperties': False, 'properties': {}}},
     {'name': 'desktop_input', 'description': 'Approved primary-screen input. Coordinates are native screen pixels from the last screenshot. PyAutoGUI corner fail-safe is enabled.',
      'parameters': {'type': 'object', 'additionalProperties': False, 'required': ['action'], 'properties': {
          'action': {'type': 'string', 'enum': ['move', 'click', 'type', 'key', 'hotkey', 'scroll']},
          'x': {'type': 'integer', 'minimum': 0}, 'y': {'type': 'integer', 'minimum': 0},
          'text': {'type': 'string'}, 'key': {'type': 'string'}, 'amount': {'type': 'integer'}}}},
-    {'name': 'browser_action', 'description': 'Control isolated Google Chrome. Open HTTP(S) URLs, inspect visible text, capture screenshots, click CSS selectors, fill fields, or read tabs. Every action requires approval.',
+    {'name': 'browser_action', 'description': 'Control isolated Google Chrome. Open HTTP(S) URLs, inspect visible text, capture screenshots, click CSS selectors, fill fields, or read tabs. Uses the selected action permissions.',
      'parameters': {'type': 'object', 'additionalProperties': False, 'required': ['action'], 'properties': {
          'action': {'type': 'string', 'enum': ['open', 'text', 'screenshot', 'click', 'fill', 'tabs']},
          'url': {'type': 'string'}, 'selector': {'type': 'string'}, 'text': {'type': 'string'}, 'tab_id': {'type': 'string'}}}},

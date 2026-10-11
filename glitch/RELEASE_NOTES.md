@@ -1,4 +1,12 @@
-# Glitch 1.1.1 - Chat without setup blockers
+# Glitch 1.1.2 - Context and action permissions
+
+- Context settings now accept 1,024-131,072 tokens, including 65,535. Actual model support and available RAM still determine what can load.
+- Adds an explicit Full Access switch under Computer & safety. It is off by default and saved locally. When enabled, supported tool actions run without individual approval prompts, including authorized Discord tasks.
+- Full Access is visible in the header. Cancellation, protected paths, fixed command recipes, file-conflict detection and Discord ownership checks remain enforced. It does not grant administrator privileges or arbitrary shell execution.
+- Save settings closes the dialog only on success. Loading and testing connections keep it open; failed saves stay visible.
+- Six new backend regression tests; native WebView2 tests cover the larger context, invalid form values, save-and-close, and a second task without approval prompts. Tests do not load the user's 30B model or allocate a 65,535-token native cache.
+
+## Glitch 1.1.1 - Chat without setup blockers
 
 - Fixes the disabled Send button when no project/conversation has been selected.
 - First message automatically creates a persistent conversation with an isolated chat workspace. Project selection is optional for ordinary chat.

@@ -130,7 +130,8 @@ class DiscordGateway:
                     await message.channel.send(str(error), allowed_mentions=discord.AllowedMentions.none())
                     return
                 gateway._active_session = session
-                await message.channel.send('Glitch accepted your task. Risky actions will wait for your approval here or in the desktop app.')
+                access = 'Full Access is on; supported actions run without approval prompts.' if gateway.store.settings().get('full_access') else 'Risky actions will wait for your approval here or in the desktop app.'
+                await message.channel.send('Glitch accepted your task. ' + access)
                 asyncio.create_task(self.stream(session, message.channel))
 
             async def stream(self, session, channel):

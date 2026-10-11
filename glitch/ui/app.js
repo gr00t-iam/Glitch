@@ -90,11 +90,15 @@ function updateRuntime(runtime) {
 }
 function updateSettings(settings) {
   state.settings = settings; $('mode').textContent = settings.mode === 'hybrid' ? 'Hybrid supervision' : 'Local only';
+  $('access-mode').textContent = settings.full_access ? 'Full Access' : 'Ask before actions';
+  $('access-mode').classList.toggle('amber', !!settings.full_access);
+  $('access-note').textContent = settings.full_access ? 'Full Access is on. Actions run without approval prompts.' : 'Private by default. Ask before actions is on.';
   $('model-label').textContent = settings.worker_model || 'No local model selected';
   $('status-detail').textContent = settings.mode === 'hybrid' ? 'Built-in local worker · Supervisor audits on errors, loops and milestones' : 'Built-in local reasoning · Cloud audits are off';
 }
 function populateSettings() {
   const s = state.settings;
+  $('full-access').checked = !!s.full_access;
   for (const [id, key] of Object.entries({'setting-mode':'mode','worker-model':'worker_model','supervisor-url':'supervisor_url','supervisor-model':'supervisor_model','audit-interval':'audit_interval','max-steps':'max_steps','discord-user':'discord_user_id','discord-channel':'discord_channel_id','context-length':'context_length','cpu-threads':'cpu_threads','temperature':'temperature','vision-projector':'vision_projector','supervisor-auth':'supervisor_auth','supervisor-provider':'supervisor_provider','proxy-url':'proxy_url','proxy-login-url':'proxy_login_url','proxy-model':'proxy_model'})) $(id).value = s[key] ?? '';
   $('supervisor-key').value = ''; $('discord-token').value = ''; $('clear-key').checked = false; $('clear-discord').checked = false;
   $('supervisor-key').placeholder = s.key_saved ? 'Key saved securely — leave blank to keep' : 'Enter supervisor API key';
@@ -106,6 +110,7 @@ function populateSettings() {
 async function saveSettings() {
   const result = await call('save_settings', {
     mode:$('setting-mode').value, worker_model:$('worker-model').value,
+    full_access:$('full-access').checked,
     context_length:Number($('context-length').value), cpu_threads:Number($('cpu-threads').value),
     temperature:Number($('temperature').value), vision_projector:$('vision-projector').value,
     supervisor_auth:$('supervisor-auth').value, supervisor_provider:$('supervisor-provider').value,
@@ -128,7 +133,7 @@ $('new').onclick = async () => {try {const session = await call('new_conversatio
 $('settings-open').onclick = () => {populateSettings(); $('settings-dialog').showModal();};
 $('settings-close').onclick = () => {$('settings-dialog').close(); $('supervisor-key').value=''; $('discord-token').value='';};
 $('settings-dialog').addEventListener('close', () => {$('supervisor-key').value=''; $('discord-token').value=''; $('proxy-token').value='';});
-$('settings-form').onsubmit = async e => {e.preventDefault(); try {await saveSettings(); toast('Settings saved');} catch(error){toast(error.message,true);}};
+$('settings-form').onsubmit = async e => {e.preventDefault(); try {await saveSettings(); $('settings-dialog').close(); toast('Settings saved');} catch(error){toast(error.message,true);}};
 document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => {
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b === button)));
   ['models','supervisor','discord','tools'].forEach(name => $('settings-'+name).hidden = name !== button.dataset.tab);

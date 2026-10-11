@@ -65,6 +65,10 @@ class AgentEngine:
         with self.lock:
             if self.cancelled.is_set():
                 return False
+            if self.store.settings().get('full_access') is True:
+                self._emit('approval_resolved', 'Action allowed by Full Access',
+                           {'action': action, 'payload': payload, 'approved': True, 'automatic': True})
+                return True
             self.approval_event.clear()
             self.approved = False
             self.pending = {'id': str(uuid.uuid4()), 'action': action, 'payload': payload}

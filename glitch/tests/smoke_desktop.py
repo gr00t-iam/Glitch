@@ -79,6 +79,15 @@ def run(output_directory):
                 wait_for("document.getElementById('save-result').textContent === 'Saved locally'")
                 wait_for("document.getElementById('inference-status').textContent.includes('fixture.gguf')")
                 result['checks'].append('Model library selector and load/unload controls work through the native bridge')
+                window.evaluate_js("document.getElementById('context-length').value='131073';document.getElementById('settings-form').requestSubmit()")
+                assert window.evaluate_js("document.getElementById('settings-dialog').open && !document.getElementById('context-length').checkValidity()")
+                assert store.settings()['context_length'] == 4096
+                window.evaluate_js("document.getElementById('context-length').value='65535';document.getElementById('settings-form').requestSubmit()")
+                wait_for("!document.getElementById('settings-dialog').open")
+                assert store.settings()['context_length'] == 65535
+                result['checks'].append('65,535-token context saves and closes Settings; invalid context leaves it open')
+                window.evaluate_js("document.getElementById('settings-open').click()")
+                wait_for("document.getElementById('settings-dialog').open")
                 window.evaluate_js("document.getElementById('tab-supervisor').click();document.getElementById('supervisor-auth').value='proxy';document.getElementById('supervisor-auth').dispatchEvent(new Event('change'))")
                 wait_for("!document.getElementById('proxy-fields').hidden && document.getElementById('api-fields').hidden")
                 result['checks'].append('Subscription bridge fields replace developer API fields without exposing credentials')
@@ -103,6 +112,18 @@ def run(output_directory):
                 messages = store.messages(session)
                 assert any(m['role'] == 'context' for m in messages)
                 result['checks'].append('Verified tool evidence persists across turns')
+                window.evaluate_js("document.getElementById('settings-open').click();document.getElementById('tab-tools').click();document.getElementById('full-access').checked=true;document.getElementById('settings-form').requestSubmit()")
+                wait_for("!document.getElementById('settings-dialog').open && document.getElementById('access-mode').textContent === 'Full Access'")
+                assert store.settings()['full_access'] is True
+                previous_approvals = sum(e['kind'] == 'approval' for e in store.events(session, 0))
+                (project / 'note.txt').unlink()
+                window.evaluate_js("document.getElementById('prompt').value='Create a note again';document.getElementById('composer').requestSubmit()")
+                wait_for("document.getElementById('send').disabled")
+                wait_for("!document.getElementById('send').disabled")
+                assert (project / 'note.txt').exists()
+                assert sum(e['kind'] == 'approval' for e in store.events(session, 0)) == previous_approvals
+                assert not window.evaluate_js("document.getElementById('approval-dialog').open")
+                result['checks'].append('Full Access saves, stays visible and runs a second task without an approval popup')
                 layout = window.evaluate_js("(()=>{const a=document.querySelector('.sidebar').getBoundingClientRect(),b=document.querySelector('main').getBoundingClientRect(),c=document.querySelector('.timeline').getBoundingClientRect();return {width:innerWidth,height:innerHeight,sidebar:a.right,main:b.left,timeline:c.width,owl:document.querySelector('.brand img').naturalWidth,overflow:document.documentElement.scrollWidth>innerWidth}})()")
                 assert layout['sidebar'] <= layout['main'] and layout['owl'] > 0 and not layout['overflow'], layout
                 result['layout'] = layout
