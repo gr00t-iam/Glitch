@@ -1,5 +1,7 @@
 # NexusHarness
 
+NexusHarness is a local-first UI for running local LLM harnesses and guarded autonomous agent workflows.
+
 ## Desktop Agent Runtime
 
 NexusHarness now ships as a Windows desktop shell backed by Electron and the existing Vite/React UI. The browser renderer never receives raw Node.js access; local filesystem and shell work are routed through `desktop/main.cjs`, `desktop/preload.cjs`, and the guarded runtime modules under `desktop/runtime`.
