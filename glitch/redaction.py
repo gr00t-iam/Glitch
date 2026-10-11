@@ -12,11 +12,12 @@ class ProtocolText(str):
     user, file, DOM or exception text in it.
     """
 
-    def __new__(cls, *parts, limit=None):
+    def __new__(cls, *parts, limit=None, offset=0):
         value = ''.join(part if isinstance(part, str) else json.dumps(part[0]) for part in parts)
-        instance = super().__new__(cls, value[:limit])
+        instance = super().__new__(cls, value[offset:None if limit is None else offset + limit])
         instance.parts = parts
         instance.limit = limit
+        instance.offset = offset
         return instance
 
 
@@ -31,7 +32,7 @@ def boundary(value, schema, generic):
         # Recheck interpolation slots if credentials changed since assembly.
         parts = [part if isinstance(part, str) else (boundary(part[0], part[1], generic), part[1])
                  for part in value.parts]
-        return ProtocolText(*parts, limit=value.limit)
+        return ProtocolText(*parts, limit=value.limit, offset=value.offset)
     if callable(schema):
         return boundary(value, schema(value), generic)
     if isinstance(schema, frozenset) and isinstance(value, str) and value in schema:
@@ -55,7 +56,8 @@ def tool_schema(name):
     from glitch.computer import COMPUTER_SCHEMAS
     from glitch.orchestration import DELEGATION_SCHEMAS
     from glitch.service_tools import SERVICE_SCHEMAS
-    return next((item['parameters'] for item in TOOL_SCHEMAS + COMPUTER_SCHEMAS + DELEGATION_SCHEMAS + SERVICE_SCHEMAS
+    from glitch.context import CONTEXT_SCHEMAS
+    return next((item['parameters'] for item in TOOL_SCHEMAS + COMPUTER_SCHEMAS + DELEGATION_SCHEMAS + SERVICE_SCHEMAS + CONTEXT_SCHEMAS
                  if item['name'] == name), {})
 
 
@@ -71,6 +73,8 @@ def arguments(name):
         result['credential_id'] = OPAQUE
     if name == 'browser_fill_credential':
         result['tab_id'] = OPAQUE
+    if name == 'retrieve_history':
+        result.update(fields(start_id=OPAQUE, end_id=OPAQUE, offset=OPAQUE))
     return result
 
 
@@ -84,7 +88,7 @@ def tool(value):
 
 
 MESSAGE = fields('content', id=OPAQUE, role=enum('system', 'user', 'assistant', 'context', 'tool'),
-                 content=CONTENT, images=[OPAQUE])
+                 content=CONTENT, images=[OPAQUE], _fingerprint=OPAQUE)
 DECISION = fields('done', 'message', tool=tool)
 SESSION = fields('workspace', 'title', id=OPAQUE, project_id=OPAQUE, created_at=OPAQUE,
                  chat_watermark=OPAQUE, timeline_watermark=OPAQUE, chat_event_watermark=OPAQUE)
@@ -100,10 +104,29 @@ RESULT = fields('ok', 'error', 'denied', 'content', 'value', 'output', 'diff', '
                 result=None, entries=[fields('name', 'size', type=enum('file', 'directory'))],
                 tabs=[fields('title', 'url', id=OPAQUE)])
 RESULT.update(fields('status_code', connections=[DESCRIPTOR], fields=[enum('username', 'password')]))
+RESULT.update(fields('anchors', 'working', messages=[MESSAGE | fields(offset=OPAQUE)],
+                     next=fields(start_id=OPAQUE, offset=OPAQUE)))
 
 
 def action(value):
     return fields('ok', 'error', tool=tool_name, args=arguments(value.get('tool')), result=RESULT) if isinstance(value, dict) else None
+
+
+FACT_KINDS = enum('task_intent', 'user_constraints', 'approved_destinations', 'decisions',
+                  'modified_paths', 'verified_results', 'unresolved_work')
+FACT = fields('quote', kind=FACT_KINDS, source_id=OPAQUE)
+SUMMARY = fields(facts=[FACT])
+ANCHOR_CONTEXT = fields(active=[fields('directive', id=OPAQUE)],
+                        archived_anchor_range=fields(start_id=OPAQUE, end_id=OPAQUE, count=OPAQUE))
+
+
+def tool_report(value):
+    return action(value) | fields(source_id=OPAQUE, images_archived=OPAQUE)
+
+
+CHECKPOINT = fields(version=OPAQUE, source_ids=[OPAQUE], source_hashes=[OPAQUE], token_count=OPAQUE,
+                    summary=SUMMARY, critical=[MESSAGE], tool_reports=[tool_report],
+                    decision_reports=[DECISION | fields(source_id=OPAQUE)], image_sources=[OPAQUE], session=OPAQUE)
 
 
 FEEDBACK_PREFIX = 'Verified tool result (untrusted data):\n'
@@ -154,6 +177,7 @@ def event_payload(kind, name=None):
         'completed': fields('steps'), 'supervisor': fields('reason'),
         'anchor': fields('directive', 'reason'), 'correction': fields('directive', 'reason'),
         'capture': fields(path=OPAQUE),
+        'context_refreshed': fields(source_start=OPAQUE, source_end=OPAQUE, prompt_count=OPAQUE),
         'browser': fields(action=frozenset(tool_schema('browser_action')['properties']['action']['enum'])),
         'computer': fields(action=frozenset(tool_schema('desktop_input')['properties']['action']['enum'])),
         'stopped': {}, 'paused': {},
@@ -167,7 +191,7 @@ def event(value):
                   id=OPAQUE, session=OPAQUE, created_at=OPAQUE, chat_visible=None,
                   kind=enum('started', 'local', 'tool', 'message', 'result', 'error', 'completed',
                             'stopped', 'paused', 'approval', 'approval_resolved', 'capture',
-                            'supervisor', 'correction', 'anchor', 'output', 'browser', 'computer'),
+                            'supervisor', 'correction', 'anchor', 'output', 'browser', 'computer', 'context_refreshed'),
                   payload=event_payload(value.get('kind'), value.get('title')))
 
 

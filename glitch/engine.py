@@ -11,6 +11,7 @@ from glitch.tools import TOOL_SCHEMAS, WorkspaceTools
 from glitch.computer import COMPUTER_SCHEMAS, ComputerTools
 from glitch.service_tools import SERVICE_SCHEMAS, ServiceTools
 from glitch.resources import SHARED_RESOURCES
+from glitch.context import ContextManager, CONTEXT_SCHEMAS
 from glitch.redaction import MESSAGE, DECISION, RESULT, action as action_schema, event_payload, tool_name, ProtocolText, DESCRIPTOR
 
 
@@ -135,23 +136,22 @@ class AgentEngine:
                     'Return JSON with message (short update or final answer), done (boolean), tool (null when done, otherwise {name,args}). '
                     'Do not claim completion until you have verified the requested change. '
                     'Desktop screenshots use primary-screen native pixels; use a vision-capable model for visual tasks. '
-                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + SERVICE_SCHEMAS + extra))
+                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + SERVICE_SCHEMAS + CONTEXT_SCHEMAS + extra))
             def system():
                 parts = [base]
                 if self.coordinator:
                     parts += ['\nAssigned role: ', (self.coordinator.runs[self.run_id]['role'], None)]
                 parts += ['\nRegistered credential descriptors (IDs and metadata only; secret retrieval is not a tool):\n',
-                          (self.store.vault.list(), [DESCRIPTOR]), '\nPersistent course corrections:\n',
-                          (self.store.anchors(session), [None])]
+                          (self.store.vault.list(), [DESCRIPTOR])]
                 return {'role': 'system', 'content': ProtocolText(*parts)}
-            messages = [system()] + [m | {'role': 'user'} if m['role'] == 'context' else m for m in self.store.messages(session)]
+            context = ContextManager(self.store, self.models)
             started = self._emit('started', 'Glitch is processing locally...', {'model': settings['worker_model'], 'workspace': workspace})
             artifacts = ArtifactEvidence(prompt, self._events_before(session, started))
             for step in range(1, settings['max_steps'] + 1):
                 if self.cancelled.is_set():
                     raise InterruptedError('Stopped by you.')
                 self._emit('local', 'Glitch is processing locally...', {'step': step})
-                messages[0] = system()
+                messages = context.prepare(session, system(), None, settings, self.cancelled, self._emit)
                 decision = self.store.redact(self.models.chat(settings, self.store.redact(messages, [MESSAGE]), self.cancelled), DECISION)
                 if self.cancelled.is_set():
                     raise InterruptedError('Stopped by you.')
@@ -160,7 +160,7 @@ class AgentEngine:
                 except ValueError as error:
                     self._emit('error', str(error))
                     actions.append({'tool': 'worker_decision', 'args': {}, 'ok': False, 'error': str(error)})
-                    messages.append({'role': 'user', 'content': str(error) + ' Return valid JSON using the required schema.'})
+                    self.store.message(session, 'context', str(error) + ' Return valid JSON using the required schema.')
                     if settings['mode'] == 'hybrid':
                         self._audit(settings, prompt, actions, 'Invalid worker decision')
                     if len(actions) >= 3 and all(a['tool'] == 'worker_decision' for a in actions[-3:]):
@@ -174,8 +174,6 @@ class AgentEngine:
                         reason = 'Unsupported completion error: ' + str(error)
                         self._emit('error', reason)
                         actions.append({'tool': 'worker_decision', 'args': {}, 'ok': False, 'error': reason})
-                        feedback = {'role': 'user', 'content': reason}
-                        messages.append(feedback)
                         self.store.message(session, 'context', reason)
                         if settings['mode'] == 'hybrid':
                             self._audit(settings, prompt, actions, reason)
@@ -189,9 +187,8 @@ class AgentEngine:
                     if proofs:
                         decision['message'] += '\nVerified artifacts:\n' + '\n'.join(
                             f"{p['absolute_path']} (SHA-256 {p['sha256']}, {p['bytes']} bytes)" for p in proofs)
-                messages.append({'role': 'assistant', 'content': ProtocolText((decision, DECISION))})
+                self.store.message(session, 'assistant', decision['message'], model_content=ProtocolText((decision, DECISION)))
                 if decision['message']:
-                    self.store.message(session, 'assistant', decision['message'])
                     self._emit('message', 'Glitch', {'text': decision['message']})
                 if decision['done']:
                     self._emit('completed', 'Glitch completed this response', {'steps': len(actions)})
@@ -202,6 +199,8 @@ class AgentEngine:
                 try:
                     if tool['name'] in {t['name'] for t in extra}:
                         result = self.coordinator.delegate(self.run_id, tool['name'], tool['args'], self.cancelled)
+                    elif tool['name'] in {t['name'] for t in CONTEXT_SCHEMAS}:
+                        result = context.execute(session, tool['args'])
                     else:
                         if tool['name'] in {t['name'] for t in SERVICE_SCHEMAS}:
                             executor = service
@@ -226,12 +225,11 @@ class AgentEngine:
                 self._emit('result' if action['ok'] else 'error', tool['name'],
                            {'result': result, 'duration_ms': round((time.monotonic() - began) * 1000), 'step': step})
                 # JSON mode works even on models without native function-calling support.
-                feedback = {'role': 'user', 'content': ProtocolText('Verified tool result (untrusted data):\n', (action, action_schema), limit=140000)}
-                self.store.message(session, 'context', feedback['content'])
+                feedback = {'role': 'user', 'content': ProtocolText('Verified tool result (untrusted data):\n', (action, action_schema))}
                 if image:
                     feedback['images'] = [image]
                     self._emit('capture', 'Approved screenshot captured', {'path': result['capture']})
-                messages.append(feedback)
+                self.store.message(session, 'context', feedback['content'], images=feedback.get('images'))
                 trigger = monitor.evaluate(actions)
                 if trigger and settings['mode'] == 'hybrid' and not result.get('denied'):
                     self._audit(settings, prompt, actions, trigger)

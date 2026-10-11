@@ -14,7 +14,7 @@ async function call(method, ...args) {
 }
 function status(title, kind = '') {
   $('status').textContent = title;
-  $('companion').className = 'companion' + (['local','tool','browser','computer'].includes(kind) ? ' busy' : kind === 'supervisor' ? ' busy cloud' : '');
+  $('companion').className = 'companion' + (['local','tool','browser','computer','context_refreshed'].includes(kind) ? ' busy' : kind === 'supervisor' ? ' busy cloud' : '');
 }
 function addMessage(role, content) {
   $('welcome')?.remove();
@@ -41,7 +41,7 @@ function addEvent(event, live = false) {
   state.count++; $('event-count').textContent = String(state.count);
   if (live) {
     if (event.kind === 'message' && event.chat_visible !== false && event.id > state.chatEventWatermark) addMessage('assistant', event.payload.text);
-    if (['started','local','supervisor','browser','computer','completed','stopped','paused'].includes(event.kind)) status(event.title, event.kind);
+    if (['started','local','supervisor','browser','computer','completed','stopped','paused','context_refreshed'].includes(event.kind)) status(event.title, event.kind);
     if (['correction','anchor'].includes(event.kind)) {toast(event.title); status(event.title);}
     if (event.kind === 'error') toast(event.title, true);
   }

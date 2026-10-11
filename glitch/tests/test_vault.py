@@ -12,6 +12,7 @@ from glitch.api import DesktopAPI
 from glitch.engine import AgentEngine
 from glitch.orchestration import AgentCoordinator
 from glitch.storage import DEFAULTS, Store
+from glitch.tests.context_fixtures import ContextModelFixture
 
 try:
     from glitch.vault import Vault
@@ -224,7 +225,7 @@ class VaultTests(unittest.TestCase):
         self.save()
         session = self.store.new_session(self.root)
         observed = []
-        class Models:
+        class Models(ContextModelFixture):
             def chat(inner, settings, messages, cancel):
                 observed.append(json.loads(json.dumps(messages)))
                 if len(observed) == 1:
@@ -256,7 +257,7 @@ class VaultTests(unittest.TestCase):
 
     def test_coordinator_persistence_and_completion_callbacks(self):
         self.save()
-        class Models:
+        class Models(ContextModelFixture):
             def chat(inner, *_):
                 return {'done': True, 'message': 'echo ' + SYNTHETIC, 'tool': None}
         coordinator = AgentCoordinator(self.store, Models())
@@ -343,7 +344,7 @@ class VaultTests(unittest.TestCase):
         self.save()
         session = self.store.new_session(self.root)
         seen = []
-        class Models:
+        class Models(ContextModelFixture):
             def chat(inner, settings, messages, cancel):
                 seen.append(json.loads(json.dumps(messages)))
                 if len(seen) == 1:
@@ -428,7 +429,7 @@ class VaultTests(unittest.TestCase):
         response.iter_lines.return_value = [b'data: ' + json.dumps({'choices': [
             {'delta': {'content': json.dumps(decision)}, 'finish_reason': 'stop'}]}).encode()]
         client.post.return_value = response
-        with patch.object(runtime, '_client', return_value=client):
+        with patch.object(runtime, '_client', return_value=client), patch.object(runtime, 'count_prompt', return_value=23):
             answer = ModelClient(self.store, runtime).chat(
                 self.store.settings() | {'worker_model': 'fixture.gguf'},
                 [{'role': 'user', 'content': 'echo user role', 'images': ['user-role-image']}], threading.Event())
@@ -446,7 +447,7 @@ class VaultTests(unittest.TestCase):
                             {'username': username, 'password': SYNTHETIC})
         session = self.store.new_session(self.root)
         seen = []
-        class Models:
+        class Models(ContextModelFixture):
             def chat(inner, settings, messages, cancel):
                 seen.append(messages)
                 if len(seen) == 1:
@@ -555,7 +556,7 @@ class VaultTests(unittest.TestCase):
         self.assertTrue(api.save_settings({'full_access': True})['full_access'])
 
     def test_task_redaction_shares_vault_mutation_admission_lock(self):
-        class Models:
+        class Models(ContextModelFixture):
             def chat(inner, *_):
                 return {'done': True, 'message': 'Fixture completed', 'tool': None}
         coordinator = AgentCoordinator(self.store, Models())

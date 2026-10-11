@@ -8,9 +8,10 @@ from glitch.storage import Store
 from glitch.monitor import TriggerMonitor
 from glitch.tools import WorkspaceTools
 from glitch.engine import AgentEngine
+from glitch.tests.context_fixtures import ContextModelFixture
 
 
-class FakeModels:
+class FakeModels(ContextModelFixture):
     def __init__(self, decisions):
         self.decisions = iter(decisions)
         self.contexts = []

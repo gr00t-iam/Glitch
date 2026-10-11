@@ -1,6 +1,7 @@
 """Durable local conversations, events, anchors and Windows-protected settings."""
 
 import ctypes
+import hashlib
 import ipaddress
 import json
 import os
@@ -130,6 +131,16 @@ class Store:
             db.execute('''UPDATE settings SET value='""' WHERE key='vision_projector'
                 AND value!='""' AND value=(SELECT value FROM settings WHERE key='worker_model')''')
             self._migrate_history(db)
+            message_columns = {row['name'] for row in db.execute('PRAGMA table_info(messages)')}
+            for name in ('images', 'model_content'):
+                if name not in message_columns:
+                    db.execute(f'ALTER TABLE messages ADD COLUMN {name} TEXT')
+            db.executescript('''
+                CREATE TABLE IF NOT EXISTS context_checkpoints(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL,
+                    checkpoint TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+                CREATE INDEX IF NOT EXISTS checkpoint_session ON context_checkpoints(session,id);
+            ''')
 
     def _migrate_history(self, db):
         db.execute('CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, workspace TEXT NOT NULL UNIQUE)')
@@ -372,16 +383,135 @@ class Store:
             raise ValueError('Conversation does not exist.')
         return dict(row)
 
-    def message(self, session, role, content):
+    def message(self, session, role, content, images=None, model_content=None):
         content = self.redact(content, CONTENT if role == 'context' else None)
+        model_content = self.redact(model_content, CONTENT) if model_content is not None else None
         with self.lock, self.connect() as db:
-            db.execute('INSERT INTO messages(session,role,content) VALUES (?,?,?)', (session, role, content))
+            cursor = db.execute('INSERT INTO messages(session,role,content,images,model_content) VALUES (?,?,?,?,?)',
+                                (session, role, content, json.dumps(images) if images else None, model_content))
             if role == 'user':
                 db.execute("UPDATE sessions SET title=? WHERE id=? AND title='New conversation'", (content[:60], session))
+            return cursor.lastrowid
 
     def messages(self, session):
         with self.lock, self.connect() as db:
             return self.redact([stored_message(dict(r)) for r in db.execute('SELECT id,role,content FROM messages WHERE session=? ORDER BY id', (session,))], [MESSAGE])
+
+    @staticmethod
+    def _message_digest(row):
+        return hashlib.sha256(json.dumps([row['id'], row['role'], row['content'], row['images'], row['model_content']],
+                                         ensure_ascii=True).encode()).hexdigest()
+
+    def _working_row(self, row):
+        result = dict(row)
+        result['_fingerprint'] = self._message_digest(row)
+        result['content'] = row['model_content'] if row['model_content'] is not None else row['content']
+        result.pop('model_content', None)
+        result.pop('session', None)
+        if row['images']:
+            result['images'] = json.loads(row['images'])
+        else:
+            result.pop('images', None)
+        if row['model_content'] is not None:
+            # Only host-authored assistant decision envelopes use this column.
+            from glitch.redaction import DECISION, ProtocolText
+            result['content'] = ProtocolText((json.loads(result['content']), DECISION))
+        return self.redact(stored_message(result), MESSAGE)
+
+    def history_page(self, session, after=0, limit=32, end=None):
+        if type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError('History page limit must be 1-128.')
+        with self.lock, self.connect() as db:
+            return [self._working_row(row) for row in db.execute(
+                'SELECT * FROM messages WHERE session=? AND id>? AND (? IS NULL OR id<=?) ORDER BY id LIMIT ?',
+                (session, after, end, end, limit))]
+
+    def source_message(self, session, identifier):
+        with self.lock, self.connect() as db:
+            row = db.execute('SELECT * FROM messages WHERE session=? AND id=?', (session, identifier)).fetchone()
+            if row is None:
+                raise ValueError('Checkpoint source is missing from this conversation.')
+            return self._working_row(row)
+
+    def context_checkpoint(self, session):
+        with self.lock, self.connect() as db:
+            row = db.execute('SELECT checkpoint FROM context_checkpoints WHERE session=? ORDER BY id DESC LIMIT 1',
+                             (session,)).fetchone()
+        return json.loads(row['checkpoint']) if row else None
+
+    def save_context_checkpoint(self, session, checkpoint, cancel):
+        from glitch.redaction import CHECKPOINT
+        checkpoint = self.redact(checkpoint, CHECKPOINT)
+        with self.lock, self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if not db.execute('SELECT 1 FROM sessions WHERE id=?', (session,)).fetchone():
+                raise ValueError('Conversation was removed before checkpoint commit.')
+            ids = checkpoint['source_ids']
+            actual = [row['id'] for row in db.execute('SELECT id FROM messages WHERE session=? AND id<=? ORDER BY id',
+                                                    (session, ids[-1]))]
+            if ids != actual:
+                raise ValueError('Checkpoint source coverage changed; no checkpoint saved.')
+            for identifier, digest in zip(ids, checkpoint['source_hashes']):
+                if cancel.is_set():
+                    raise InterruptedError('Stopped before checkpoint commit.')
+                row = db.execute('SELECT * FROM messages WHERE session=? AND id=?', (session, identifier)).fetchone()
+                if self._message_digest(row) != digest:
+                    raise ValueError('Checkpoint source changed; no checkpoint saved.')
+            if len(ids) != len(checkpoint['source_hashes']):
+                raise ValueError('Incomplete checkpoint source hashes.')
+            if cancel.is_set():
+                raise InterruptedError('Stopped before checkpoint commit.')
+            db.execute('INSERT INTO context_checkpoints(session,checkpoint) VALUES(?,?)',
+                       (session, json.dumps(checkpoint, ensure_ascii=True)))
+
+    def retrieve_history(self, session, start_id, end_id, limit, offset=0, anchors=False, working=False):
+        if (any(type(value) is not int for value in (start_id, end_id, limit, offset)) or
+                start_id < 1 or end_id < start_id or not 1 <= limit <= 20 or offset < 0 or
+                type(anchors) is not bool or type(working) is not bool):
+            raise ValueError('Use ordered positive archive IDs, a 1-20 limit and a nonnegative character offset.')
+        table, column = ('anchors', 'directive') if anchors else ('messages', 'content')
+        with self.lock, self.connect() as db:
+            rows = db.execute(f'SELECT id,{column}' + (',role,model_content' if not anchors else '') +
+                              f' FROM {table} WHERE session=? AND id BETWEEN ? AND ? ORDER BY id LIMIT ?',
+                              (session, start_id, end_id, limit + 1)).fetchall()
+        remaining, result, continuation = 16000, [], None
+        for row in rows[:limit]:
+            if working and not anchors and row['model_content'] is not None:
+                from glitch.redaction import DECISION, ProtocolText
+                text = self.redact(ProtocolText((json.loads(row['model_content']), DECISION)), CONTENT)
+            elif not anchors and row['role'] == 'context':
+                text = self.redact(stored_message({'role': 'context', 'content': row[column]})['content'], CONTENT)
+            else:
+                text = self.redact(row[column])
+            start = offset if row['id'] == start_id else 0
+            from glitch.redaction import ProtocolText
+            content = (ProtocolText(*text.parts, offset=start, limit=remaining) if isinstance(text, ProtocolText)
+                       else text[start:start + remaining])
+            result.append({'id': row['id'], 'role': 'context' if anchors else row['role'], 'content': content,
+                           'offset': start})
+            remaining -= len(content)
+            if start + len(content) < len(text):
+                continuation = {'start_id': row['id'], 'offset': start + len(content)}
+                break
+            if not remaining:
+                next_rows = [item for item in rows if item['id'] > row['id']]
+                if next_rows:
+                    continuation = {'start_id': next_rows[0]['id'], 'offset': 0}
+                break
+        if continuation is None and len(rows) > limit:
+            continuation = {'start_id': rows[limit]['id'], 'offset': 0}
+        return {'ok': True, 'session': session, 'messages': result, 'truncated': continuation is not None,
+                'next': continuation, 'anchors': anchors, 'working': working}
+
+    def active_anchors(self, session, limit=4):
+        with self.lock, self.connect() as db:
+            rows = db.execute('SELECT id,directive FROM anchors WHERE session=? ORDER BY id DESC LIMIT ?',
+                              (session, limit)).fetchall()
+            boundary = rows[-1]['id'] if rows else 0
+            archive = db.execute('SELECT MIN(id),MAX(id),COUNT(*) FROM anchors WHERE session=? AND id<?',
+                                 (session, boundary)).fetchone()
+        return {'active': [{'id': row['id'], 'directive': self.redact(row['directive'])} for row in reversed(rows)],
+                'archived_anchor_range': {'start_id': archive[0], 'end_id': archive[1], 'count': archive[2]} if archive[2] else None}
 
     def anchor(self, session, directive):
         with self.lock, self.connect() as db:

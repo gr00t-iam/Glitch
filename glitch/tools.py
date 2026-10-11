@@ -1,5 +1,6 @@
 """Workspace-scoped tools with approval before every mutation or command."""
 
+import codecs
 import difflib
 import hashlib
 import os
@@ -83,7 +84,8 @@ class WorkspaceTools:
             path = self.resolve(args['path'])
             with path.open('rb') as source:
                 data = source.read(120001)
-            return {'ok': True, 'path': args['path'], 'content': data[:120000].decode('utf-8'), 'truncated': len(data) > 120000}
+            preview = codecs.getincrementaldecoder('utf-8')().decode(data[:120000], final=len(data) <= 120000)
+            return {'ok': True, 'path': args['path'], 'content': preview, 'truncated': len(data) > 120000}
         if name == 'write_file':
             return self.write(args)
         return self.command(args['recipe'])

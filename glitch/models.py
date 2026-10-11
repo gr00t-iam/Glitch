@@ -5,7 +5,7 @@ import threading
 from glitch.shared_runtime import SharedModelRuntime
 from glitch.model_manager import ModelManager
 from glitch.supervisor import SupervisorBridge
-from glitch.redaction import MESSAGE, DECISION
+from glitch.redaction import MESSAGE, DECISION, SUMMARY
 
 DECISION_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -51,7 +51,7 @@ class ModelClient:
             self._load_thread.start()
         return {'ok': True, 'message': 'Loading model...'}
 
-    def chat(self, settings, messages, cancel):
+    def _ready(self, settings, cancel):
         if cancel.is_set():
             raise InterruptedError('Stopped.')
         # Model Manager may already be loading. Wait on the agent thread, never the UI bridge.
@@ -63,6 +63,19 @@ class ModelClient:
             path = self.library.path(settings['worker_model'])
             projector = self.library.path(settings['vision_projector']) if settings['vision_projector'] else None
             self.worker.load(path, settings, cancel, projector)
+
+    def count_prompt(self, settings, messages, cancel):
+        self._ready(settings, cancel)
+        return self.worker.count_prompt(self.store.redact(messages, [MESSAGE]), cancel)
+
+    def summarize(self, settings, messages, schema, cancel):
+        self._ready(settings, cancel)
+        # Deliberately bypass supervisor and engine: one ordinary local reservation,
+        # released by worker.chat before prepare can request the next generation.
+        return self.store.redact(self.worker.chat(self.store.redact(messages, [MESSAGE]), schema, cancel), SUMMARY)
+
+    def chat(self, settings, messages, cancel):
+        self._ready(settings, cancel)
         return self.store.redact(self.worker.chat(self.store.redact(messages, [MESSAGE]), DECISION_SCHEMA, cancel), DECISION)
 
     def review(self, settings, task, actions, reason, cancel):

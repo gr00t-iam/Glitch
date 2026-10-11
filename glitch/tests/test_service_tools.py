@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 from glitch.tests import test_vault as fixtures
 from glitch.redaction import DECISION, RESULT, RUNTIME
+from glitch.tests.context_fixtures import ContextModelFixture
 
 SYNTHETIC, ORIGIN = fixtures.SYNTHETIC, fixtures.ORIGIN
 
@@ -116,7 +117,7 @@ class ServiceTests(unittest.TestCase):
         from glitch.engine import AgentEngine
         session = self.store.new_session(self.root)
         seen = []
-        class Models:
+        class Models(ContextModelFixture):
             def chat(inner, settings, messages, cancel):
                 seen.append(messages[:])
                 if len(seen) == 1:
@@ -139,6 +140,8 @@ class ServiceTests(unittest.TestCase):
         decisions = iter([{'done': False, 'message': 'Fixture', 'tool': {'name': 'unknown-fixture', 'args': {}}},
                           {'done': True, 'message': 'Done', 'tool': None}])
         models = Mock()
+        models.count_prompt = ContextModelFixture().count_prompt
+        models.summarize = ContextModelFixture().summarize
         models.chat.side_effect = lambda *_: next(decisions)
         with patch('glitch.engine.WorkspaceTools.execute') as workspace, \
                 patch('glitch.engine.ComputerTools.execute') as computer, \
@@ -160,6 +163,8 @@ class ServiceTests(unittest.TestCase):
             self.assertTrue(inner.approve('Browser Action', args))
             self.assertTrue(self.tools.resources.desktop.locked())
             return {'ok': True}
+        models.count_prompt = ContextModelFixture().count_prompt
+        models.summarize = ContextModelFixture().summarize
         with patch('glitch.engine.ComputerTools.execute', new=execute):
             AgentEngine(self.store, models).run_sync(session, 'Fixture')
         results = [e for e in self.store.events(session, 0) if e['title'] == 'browser_action' and e['kind'] == 'result']
