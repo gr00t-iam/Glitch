@@ -2,6 +2,7 @@
 
 import threading
 from functools import wraps
+from glitch.redaction import BRIDGE
 
 
 def _redacted_bridge(cls):
@@ -10,13 +11,20 @@ def _redacted_bridge(cls):
         @wraps(method)
         def invoke(self, *args, **kwargs):
             try:
-                result = method(self, *args, **kwargs)
-                return result if method.__name__ in ('screenshot', 'vault_list') else self._store.redact(result)
+                if method.__name__ in ('send', 'spawn_agent', 'save_settings'):
+                    with self._engine.lock:
+                        self._require_initialized()
+                        result = method(self, *args, **kwargs)
+                else:
+                    result = method(self, *args, **kwargs)
+                if method.__name__ in ('screenshot', 'vault_list') or (method.__name__ == 'bootstrap' and result.get('recovery_required')):
+                    return result
+                return self._store.redact(result, BRIDGE.get(method.__name__))
             except Exception as error:
                 try:
                     message = self._store.redact(str(error))
                 except Exception:
-                    message = 'Credential protection failed. Repair or remove unreadable saved credentials.'
+                    message = 'Credential protection failed. Complete credential recovery and initialization before submitting tasks or settings.'
                 raise ValueError(message) from None
         return invoke
     for name, method in list(vars(cls).items()):
@@ -36,12 +44,32 @@ class DesktopAPI:
         self._audio = None
         self._speech = None
         self._voice_session = None
+        self._recovery_required = False
 
     def bootstrap(self):
-        return {'settings': self._store.settings(), 'sessions': self._store.sessions(),
+        try:
+            self._store.redact('')
+        except RuntimeError:
+            self._recovery_required = True
+            return {'initialized': False, 'recovery_required': True,
+                    'message': 'Saved credentials require recovery. Task and settings submission is blocked until initialization completes.',
+                    'vault': self.vault_list()}
+        result = {'settings': self._store.settings(), 'sessions': self._store.sessions(),
                 'runtime': self._engine.state(), 'discord': self._discord.status() if self._discord else {},
                 'startup_warnings': list(self._store.startup_warnings), 'voice': self.voice_status(),
-                'vault': self.vault_list()}
+                'vault': self.vault_list(), 'initialized': True, 'recovery_required': False}
+        result = self._store.redact(result, BRIDGE['bootstrap'])
+        self._recovery_required = False
+        return result
+
+    def _require_initialized(self):
+        if not self._recovery_required:
+            try:
+                self._store.redact('')
+            except RuntimeError:
+                self._recovery_required = True
+        if self._recovery_required:
+            raise ValueError('Complete credential recovery and initialization before submitting tasks or settings.')
 
     def vault_list(self):
         return self._store.vault.list()

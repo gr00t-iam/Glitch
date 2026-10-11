@@ -57,7 +57,9 @@ class SupervisorBridge:
         if cancel.is_set():
             raise InterruptedError('Stopped.')
         endpoint, provider, model, headers = self._configuration(settings)
-        audit = json.dumps(self.store.redact({'task': task, 'reason': reason, 'recent_actions': actions[-15:]}))[:24000]
+        from glitch.redaction import fields, action
+        audit = json.dumps(self.store.redact({'task': task, 'reason': reason, 'recent_actions': actions[-15:]},
+                                           fields('task', 'reason', recent_actions=[action])))[:24000]
         body = {'model': model, 'max_tokens': 600, 'temperature': 0.1,
                 'messages': [{'role': 'user', 'content': audit}]}
         if provider == 'anthropic':

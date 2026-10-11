@@ -5,6 +5,7 @@ import time
 import uuid
 from glitch.engine import AgentEngine
 from glitch.resources import ResourceCoordinator
+from glitch.redaction import RUNTIME, event_payload, tool_name
 
 DELEGATION_SCHEMAS = [
     {'name': 'spawn_subagent', 'description': 'Delegate one independent task to a child agent in this workspace. Children cannot delegate.',
@@ -75,7 +76,7 @@ class AgentCoordinator:
             return self.store.redact({'running_session': active[0]['session'] if active else None, 'approval': approvals[0] if approvals else None,
                     'approvals': approvals, 'stopping': any(r['engine'].state()['stopping'] for r in active),
                     'runs': (self.history + [{k: v for k, v in r.items() if k != 'engine'} for r in list(self.runs.values())])[-40:],
-                    'active_sessions': [r['session'] for r in active], 'capacity': self.store.settings().get('parallel_streams', 1)})
+                    'active_sessions': [r['session'] for r in active], 'capacity': self.store.settings().get('parallel_streams', 1)}, RUNTIME)
 
     def stop(self, run_id=None):
         with self.lock:
@@ -102,7 +103,8 @@ class AgentCoordinator:
         return unsubscribe
 
     def event(self, run_id, kind, title, payload, event_id):
-        title, payload = self.store.redact(title), self.store.redact(payload)
+        payload = self.store.redact(payload, event_payload(kind, title))
+        title = self.store.redact(title, tool_name if kind in ('tool', 'result', 'error') else None)
         # Engines emit while holding their own approval lock. Never take the
         # admission lock here: state() takes admission -> engine locks.
         with self.event_lock:

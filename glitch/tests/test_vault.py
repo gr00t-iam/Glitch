@@ -374,6 +374,186 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(api.vault_list()[0]['id'], item['id'])
         self.assertEqual(api.vault_delete(item['id']), {'ok': True})
 
+    def test_protocol_collisions_preserve_structure_not_text(self):
+        from glitch.models import ModelClient
+        for username in ('user', 'role', 'message', 'tool', 'name', 'args', 'action', 'phase', 'id',
+                         'done', 'ok', 'runtime', 'settings', 'ready', 'basic', 'text'):
+            with self.subTest(username=username):
+                item = self.vault.save('Collision fixture', 'basic', 'https://example.test',
+                                       {'username': username, 'password': SYNTHETIC})
+                worker = Mock()
+                worker.status.return_value = {'name': 'fixture.gguf', 'phase': 'ready'}
+                worker.chat.return_value = {'done': False, 'message': 'echo ' + username,
+                    'tool': {'name': 'browser_action', 'args': {'action': 'text', 'selector': username}}}
+                client = ModelClient(self.store, worker=worker)
+                decision = client.chat(self.store.settings() | {'worker_model': 'fixture.gguf'},
+                    [{'role': 'user', 'content': 'echo ' + username, 'images': ['user-role-image']}], threading.Event())
+                sent = worker.chat.call_args.args[0][0]
+                self.assertEqual(sent['role'], 'user')
+                self.assertEqual(sent['images'], ['user-role-image'])
+                self.assertNotIn(username, sent['content'])
+                self.assertEqual(decision['tool']['name'], 'browser_action')
+                self.assertEqual(decision['tool']['args']['action'], 'text')
+                self.assertNotIn(username, decision['message'])
+                self.assertNotIn(username, decision['tool']['args']['selector'])
+                api = DesktopAPI(self.store, AgentEngine(self.store, client), client)
+                worker.status.return_value = {'name': username, 'phase': 'ready', 'error': username,
+                                               'untrusted': {username: username}}
+                status = api.model_status()['inference']
+                self.assertEqual(status['phase'], 'ready')
+                self.assertNotIn(username, status['name'])
+                self.assertNotIn(username, str(status['untrusted']))
+                self.assertEqual(api.vault_list()[0]['id'], item['id'])
+                self.vault.delete(item['id'])
+
+    def test_shared_runtime_consumes_collision_messages_and_preserves_image_transport(self):
+        from glitch.models import ModelClient
+        from glitch.shared_runtime import SharedModelRuntime, ContextBudget
+        for username in ('user', 'role'):
+            self.vault.save('Shared fixture', 'basic', 'https://example.test',
+                            {'username': username, 'password': SYNTHETIC})
+        runtime = SharedModelRuntime()
+        runtime.process = Mock(pid=12345)
+        runtime.process.poll.return_value = None
+        runtime.snapshot.update(name='fixture.gguf', phase='ready')
+        runtime.budget = ContextBudget(4096)
+        runtime.temperature = 0.15
+        client = Mock()
+        client.__enter__ = Mock(return_value=client)
+        client.__exit__ = Mock(return_value=False)
+        response = Mock(status_code=200)
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        decision = {'done': True, 'message': 'echo user role', 'tool': None}
+        response.iter_lines.return_value = [b'data: ' + json.dumps({'choices': [
+            {'delta': {'content': json.dumps(decision)}, 'finish_reason': 'stop'}]}).encode()]
+        client.post.return_value = response
+        with patch.object(runtime, '_client', return_value=client):
+            answer = ModelClient(self.store, runtime).chat(
+                self.store.settings() | {'worker_model': 'fixture.gguf'},
+                [{'role': 'user', 'content': 'echo user role', 'images': ['user-role-image']}], threading.Event())
+        sent = client.post.call_args.kwargs['json']['messages'][0]
+        self.assertEqual(sent['role'], 'user')
+        self.assertEqual(sent['content'][1]['image_url']['url'], 'data:image/png;base64,user-role-image')
+        self.assertNotIn('user', sent['content'][0]['text'])
+        self.assertNotIn('role', answer['message'])
+        self.assertEqual(runtime.active, 0)
+        self.assertEqual(runtime.budget.used, 0)
+
+    def test_engine_serialized_protocol_and_persisted_feedback_collisions(self):
+        for username in ('role', 'message', 'tool', 'args', 'action', 'path', 'text', 'browser_action'):
+            self.vault.save('Fixture', 'basic', 'https://example.test',
+                            {'username': username, 'password': SYNTHETIC})
+        session = self.store.new_session(self.root)
+        seen = []
+        class Models:
+            def chat(inner, settings, messages, cancel):
+                seen.append(messages)
+                if len(seen) == 1:
+                    return {'done': False, 'message': 'echo role',
+                            'tool': {'name': 'browser_action', 'args': {'action': 'text'}}}
+                return {'done': True, 'message': 'Finished', 'tool': None}
+        engine = AgentEngine(self.store, Models())
+        with patch('glitch.engine.ComputerTools.execute', return_value={
+                'ok': True, 'value': {'role': 'role', 'nested': {'message': 'message'}}}) as execute:
+            engine.run_sync(session, 'Inspect synthetic page')
+        execute.assert_called_once_with('browser_action', {'action': 'text'})
+        self.assertEqual(len(seen), 2)
+        self.assertIn('otherwise {name,args}', seen[0][0]['content'])
+        self.assertEqual(json.loads(seen[1][-2]['content'])['tool']['args']['action'], 'text')
+        feedback = json.loads(seen[1][-1]['content'].split('\n', 1)[1])
+        self.assertEqual(feedback['tool'], 'browser_action')
+        self.assertEqual(feedback['args'], {'action': 'text'})
+        self.assertNotIn('role', str(feedback['result']['value']))
+        context = next(m['content'] for m in self.store.messages(session) if m['role'] == 'context')
+        persisted = json.loads(context.split('\n', 1)[1])
+        self.assertEqual(persisted['tool'], 'browser_action')
+        self.assertEqual(persisted['args'], {'action': 'text'})
+        events = self.store.events(session, 0)
+        dispatched = next(e for e in events if e['kind'] == 'tool')
+        self.assertEqual(dispatched['title'], 'browser_action')
+        self.assertEqual(dispatched['payload']['args'], {'action': 'text'})
+
+    def test_recovery_gate_also_checks_direct_submission_before_bootstrap(self):
+        item = self.save()
+        session = self.store.new_session(self.root)
+        with self.store.connect() as db:
+            db.execute('UPDATE vault SET ciphertext=? WHERE id=?', (b'corrupt-direct-fixture', item['id']))
+        engine = AgentEngine(self.store, Mock())
+        api = DesktopAPI(self.store, engine, Mock())
+        with patch.object(engine, 'start') as start:
+            with self.assertRaises(ValueError):
+                api.send(session, 'Blocked fixture')
+            start.assert_not_called()
+        before = self.store.settings()
+        with self.assertRaises(ValueError):
+            api.save_settings({'full_access': True})
+        self.assertEqual(self.store.settings(), before)
+
+    def test_schema_rules_are_contextual_and_approval_enums_survive(self):
+        from glitch.redaction import RUNTIME, event_payload
+        self.vault.save('Fixture', 'basic', 'https://example.test',
+                        {'username': 'action', 'password': SYNTHETIC})
+        pending = {'id': 'fixture-opaque-id', 'action': 'Browser Action',
+                   'payload': {'action': 'text', 'notice': 'echo action',
+                               'selector': 'action', 'unknown': {'action': 'action'}}}
+        runtime = self.store.redact({'approval': pending, 'running_session': {'echo': SYNTHETIC}}, RUNTIME)
+        self.assertEqual(runtime['approval']['id'], pending['id'])
+        self.assertEqual(runtime['approval']['action'], 'Browser Action')
+        self.assertEqual(runtime['approval']['payload']['action'], 'text')
+        self.assertNotIn('action', runtime['approval']['payload']['selector'])
+        self.assertNotIn('action', str(runtime['approval']['payload']['unknown']))
+        self.assertNotIn(SYNTHETIC, str(runtime['running_session']))
+        unknown = self.store.redact({'id': SYNTHETIC, 'path': SYNTHETIC,
+                                    'nested': {'action': 'action'}}, event_payload('untrusted-fixture'))
+        self.assertNotIn(SYNTHETIC, str(unknown))
+        self.assertNotIn('action', str(unknown))
+
+    def test_bridge_preserves_opaque_ids_but_redacts_same_value_in_text(self):
+        session = self.store.new_session(self.root)
+        self.vault.save('Identifier fixture', 'basic', 'https://example.test',
+                        {'username': session, 'password': SYNTHETIC})
+        self.store.message(session, 'user', 'echo ' + session)
+        api = DesktopAPI(self.store, AgentEngine(self.store, Mock()), Mock())
+        packet = api.bootstrap()
+        self.assertEqual(packet['sessions'][0]['id'], session)
+        self.assertNotIn(session, packet['sessions'][0]['title'])
+        loaded = api.load_conversation(session)
+        self.assertEqual(loaded['messages'][0]['role'], 'user')
+        self.assertNotIn(session, loaded['messages'][0]['content'])
+
+    def test_cold_corruption_blocks_submission_until_complete_bootstrap(self):
+        item = self.save()
+        session = self.store.new_session(self.root)
+        self.store.save_settings({'full_access': True, 'context_length': 65535, 'cpu_threads': 3,
+                                  'parallel_streams': 2, 'gpu_mode': 'cpu'})
+        with self.store.connect() as db:
+            db.execute('UPDATE vault SET ciphertext=? WHERE id=?', (b'corrupt-cold-fixture', item['id']))
+        cold = Store(self.store.directory)
+        cold._vault = Vault(cold, cipher=fixture_cipher)
+        engine = AgentEngine(cold, Mock())
+        api = DesktopAPI(cold, engine, Mock())
+        recovery = api.bootstrap()
+        self.assertFalse(recovery['initialized'])
+        self.assertTrue(recovery['recovery_required'])
+        self.assertNotIn('settings', recovery)
+        self.assertEqual(recovery['vault'][0]['id'], item['id'])
+        for operation in (lambda: api.send(session, 'fixture task'),
+                          lambda: api.save_settings({'full_access': False})):
+            with self.assertRaisesRegex(ValueError, 'initialization'):
+                operation()
+        api.vault_delete(item['id'])
+        with self.assertRaisesRegex(ValueError, 'initialization'):
+            api.save_settings({'full_access': False})
+        restored = api.bootstrap()
+        self.assertTrue(restored['initialized'])
+        self.assertTrue(restored['settings']['full_access'])
+        self.assertEqual(restored['settings']['context_length'], 65535)
+        self.assertEqual(restored['settings']['cpu_threads'], 3)
+        self.assertEqual(restored['settings']['parallel_streams'], 2)
+        self.assertEqual(restored['sessions'][0]['id'], session)
+        self.assertTrue(api.save_settings({'full_access': True})['full_access'])
+
     def test_task_redaction_shares_vault_mutation_admission_lock(self):
         class Models:
             def chat(inner, *_):
@@ -383,7 +563,7 @@ class VaultTests(unittest.TestCase):
         acquired = []
         calling_thread = threading.current_thread()
         original = self.store.redact
-        def probe(value):
+        def probe(value, schema=None):
             if threading.current_thread() is calling_thread and not acquired:
                 def contender():
                     entered = coordinator.lock.acquire(blocking=False)
@@ -393,7 +573,7 @@ class VaultTests(unittest.TestCase):
                 worker = threading.Thread(target=contender)
                 worker.start()
                 worker.join(2)
-            return original(value)
+            return original(value, schema)
         with patch.object(self.store, 'redact', side_effect=probe):
             identifier = coordinator.start(session, 'Fixture task')
             coordinator.runs[identifier]['engine'].thread.join(3)

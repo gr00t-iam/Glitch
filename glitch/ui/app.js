@@ -1,6 +1,6 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
-const state = {session: null, cursor: 0, settings: {}, sessions: [], pending: null, running: null, lastRun: null, count: 0, ready: false, polling: false, submitting: false};
+const state = {session: null, cursor: 0, settings: {}, sessions: [], pending: null, running: null, lastRun: null, count: 0, ready: false, initialized: false, initializing: false, recoveryRequired: false, polling: false, submitting: false};
 let librarySignature = '', modelPhase = '', transferPhase = '';
 function toast(text, error = false) {
   const node = document.createElement('div'); node.className = 'toast' + (error ? ' error' : ''); node.textContent = text;
@@ -8,6 +8,7 @@ function toast(text, error = false) {
 }
 async function call(method, ...args) {
   if (!state.ready) throw new Error('The desktop bridge is still starting.');
+  if (!state.initialized && !['bootstrap','vault_list','vault_save','vault_delete','discover_models','model_status','voice_status','voice_select_session','load_conversation','poll','stop','approve','stop_speaking','cancel_dictation','stop_dictation','mute_voice'].includes(method)) throw new Error('Complete credential recovery and initialization before submitting tasks or settings.');
   try { return await window.pywebview.api[method](...args); }
   catch (error) { throw new Error(error.message || String(error)); }
 }
@@ -85,10 +86,10 @@ function updateRuntime(runtime) {
   state.running = runtime.active_sessions ? (runtime.active_sessions.includes(state.session) ? state.session : null) : runtime.running_session;
   const busy = !!state.running || state.submitting;
   const full = runtime.active_sessions && runtime.active_sessions.length >= runtime.capacity;
-  $('new-agent').disabled = !!full || !state.ready;
-  $('stop').disabled = !state.running; $('send').disabled = busy || full || !state.ready;
-  $('choose').disabled = state.submitting; $('new').disabled = state.submitting;
-  $('prompt').disabled = busy || state.voicePhase === 'dictating';
+  $('new-agent').disabled = !!full || !state.initialized;
+  $('stop').disabled = !state.running; $('send').disabled = busy || full || !state.initialized;
+  $('choose').disabled = state.submitting || !state.initialized; $('new').disabled = state.submitting || !state.initialized;
+  $('prompt').disabled = busy || state.voicePhase === 'dictating' || !state.initialized;
   const runs = runtime.runs || [];
   $('stream-count').textContent = `${(runtime.active_sessions || (state.running ? [state.running] : [])).length} / ${runtime.capacity || 1}`;
   const visibleRuns = runs.filter(r=>runtime.active_sessions?.includes(r.session));
@@ -127,6 +128,7 @@ function updateSettings(settings) {
   $('status-detail').textContent = settings.mode === 'hybrid' ? 'Built-in local worker · Supervisor audits on errors, loops and milestones' : 'Built-in local reasoning · Cloud audits are off';
 }
 function populateSettings() {
+  if (!state.initialized && !state.initializing) return;
   const s = state.settings;
   $('full-access').checked = !!s.full_access;
   $('parallel-streams').value = s.parallel_streams || 1;
@@ -170,7 +172,7 @@ async function choose() {
 }
 $('choose').onclick = () => choose().catch(e => toast(e.message, true)); $('project').onclick = $('choose').onclick;
 $('new').onclick = async () => {try {const session = await call('new_conversation', state.session); state.sessions.unshift(session); await selectSession(session.id); status('Glitch is ready');} catch(e){toast(e.message,true);}};
-$('settings-open').onclick = () => {populateSettings(); $('settings-dialog').showModal(); refreshVault().catch(e=>toast(e.message,true));};
+$('settings-open').onclick = () => {if(state.initialized)populateSettings(); $('settings-dialog').showModal(); if(!state.initialized)$('tab-vault').click(); refreshVault().catch(e=>toast(e.message,true));};
 $('settings-close').onclick = () => {$('settings-dialog').close(); $('supervisor-key').value=''; $('discord-token').value='';};
 $('settings-dialog').addEventListener('close', () => {$('supervisor-key').value=''; $('discord-token').value=''; $('proxy-token').value='';clearVaultFields();});
 $('settings-form').onsubmit = async e => {e.preventDefault(); try {await saveSettings(); $('settings-dialog').close(); toast('Settings saved');} catch(error){toast(error.message,true);}};
@@ -212,7 +214,7 @@ function renderVault() {
     const edit=document.createElement('button');edit.type='button';edit.textContent='Update';edit.dataset.vaultEdit=item.id;
     edit.onclick=()=>{resetVaultEditor();state.vaultEditing=item.id;$('vault-name').value=item.name;$('vault-kind').value=item.kind;vaultKindChanged();$('vault-origin').value=item.origin;$('vault-trust').value=item.tls.custom_ca?'custom':'system';$('vault-ca-row').hidden=!item.tls.custom_ca;$('vault-heading').textContent='Update credential';$('vault-save').textContent='Update credential';$('vault-cancel').hidden=false;$('vault-result').textContent='Enter replacement values';$('vault-secret').focus();};
     const remove=document.createElement('button');remove.type='button';remove.textContent='Delete';remove.dataset.vaultDelete=item.id;
-    remove.onclick=async()=>{if(!confirm(`Delete credential "${item.name}"?`))return;state.vaultBusy=true;updateVaultGate();try{await call('vault_delete',item.id);if(state.vaultEditing===item.id)resetVaultEditor();await refreshVault();$('vault-result').textContent='Credential deleted';}catch(e){$('vault-result').textContent=e.message;}finally{state.vaultBusy=false;updateVaultGate();}};
+    remove.onclick=async()=>{if(!confirm(`Delete credential "${item.name}"?`))return;state.vaultBusy=true;updateVaultGate();try{await call('vault_delete',item.id);if(state.vaultEditing===item.id)resetVaultEditor();await refreshVault();if(!state.initialized)await initialize();$('vault-result').textContent='Credential deleted';}catch(e){$('vault-result').textContent=e.message;}finally{state.vaultBusy=false;updateVaultGate();}};
     row.append(name,detail,saved,edit,remove);$('vault-list').append(row);
   }
   updateVaultGate();
@@ -227,7 +229,7 @@ $('vault-save').onclick=async()=>{
   const payload=kind==='proxmox'?{token_id:$('vault-username').value,secret:$('vault-secret').value}:['basic','browser'].includes(kind)?{username:$('vault-username').value,password:$('vault-secret').value}:{token:$('vault-secret').value};
   if($('vault-trust').value==='custom')payload.ca_pem=$('vault-ca').value;
   state.vaultBusy=true;updateVaultGate();
-  try {await call('vault_save',$('vault-name').value.trim(),kind,$('vault-origin').value.trim(),payload,identifier);resetVaultEditor();await refreshVault();$('vault-result').textContent=identifier?'Updated securely':'Saved securely';}
+  try {await call('vault_save',$('vault-name').value.trim(),kind,$('vault-origin').value.trim(),payload,identifier);resetVaultEditor();await refreshVault();if(!state.initialized)await initialize();$('vault-result').textContent=identifier?'Updated securely':'Saved securely';}
   catch(e){$('vault-result').textContent=e.message;}
   finally{clearVaultFields();state.vaultBusy=false;updateVaultGate();}
 };
@@ -310,15 +312,46 @@ async function resolveApproval(answer) {try {await call('approve',state.pending.
 $('approve').onclick = () => resolveApproval(true); $('deny').onclick = () => resolveApproval(false);
 $('approval-dialog').addEventListener('cancel', e => {e.preventDefault();resolveApproval(false);});
 let ticks=0;
+function initializationGate() {
+  const blocked = !state.initialized;
+  for (const id of ['settings-save','full-access','composer-access','microphone']) $(id).disabled=blocked;
+  document.querySelectorAll('[data-tab]').forEach(button=>button.disabled=blocked && button.dataset.tab!=='vault');
+  if(blocked) {
+    $('access-mode').textContent='Settings unavailable';$('access-mode').classList.remove('amber');
+    $('composer-access-label').textContent='Settings unavailable';
+    $('composer-access').removeAttribute('aria-pressed');
+    $('access-note').textContent='Task and settings submission is blocked until saved settings are restored.';
+    $('save-result').textContent=state.recoveryRequired?'Repair or delete unreadable credentials in Vault.':'Restoring saved settings...';
+  } else $('save-result').textContent='';
+  updateRuntime(state.runtime || {});
+}
+async function initialize() {
+  if(state.initializing)return;
+  state.initializing=true;state.initialized=false;initializationGate();
+  try {
+    const result=await call('bootstrap');
+    if(!result.initialized) {
+      state.recoveryRequired=!!result.recovery_required;state.vault=result.vault||[];renderVault();
+      initializationGate();status(result.message || 'Saved credentials require recovery');return;
+    }
+    updateSettings(result.settings);await refreshModels(true);updateVoice(result.voice);populateSettings();
+    state.sessions=result.sessions;
+    if(state.sessions.length)await selectSession(state.session || state.sessions[0].id);
+    state.runtime=result.runtime;state.recoveryRequired=false;state.initialized=true;
+    initializationGate();$('discord-state').textContent=result.discord.message || 'Discord is disconnected';
+    for(const warning of result.startup_warnings || [])toast(warning,true);
+  } finally {state.initializing=false;if(!state.initialized)initializationGate();}
+}
 async function poll() {
-  if (!state.ready || state.polling) return;
+  if (!state.ready || state.polling || state.initializing) return;
   state.polling=true; const identifier=state.session;
   try {
+    if(!state.initialized){await initialize();return;}
     await refreshModels();
     updateVoice(await call('voice_status'));
     if (identifier) {const result=await call('poll',identifier,state.cursor); if(identifier===state.session){result.events.forEach(event=>{addEvent(event,true);state.cursor=event.id;});updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';$('discord-detail').textContent=result.discord.message || '';}}
     if (++ticks%10===0 || !identifier) {
-      const result=await call('bootstrap');state.sessions=result.sessions;updateRuntime(result.runtime);renderSessions();
+      const result=await call('bootstrap');if(!result.initialized){state.initialized=false;state.recoveryRequired=!!result.recovery_required;initializationGate();return;}state.sessions=result.sessions;updateSettings(result.settings);updateRuntime(result.runtime);renderSessions();
       if(!result.runtime.runs && result.runtime.running_session && result.runtime.running_session !== state.lastRun) {
         state.lastRun=result.runtime.running_session;
         if(state.session !== state.lastRun) await selectSession(state.lastRun);
@@ -331,7 +364,7 @@ async function poll() {
 window.addEventListener('pywebviewready', async () => {
   if (state.ready) return;
   state.ready=true;
-  try {const result=await call('bootstrap');updateSettings(result.settings);await refreshModels(true);populateSettings();state.sessions=result.sessions;if(state.sessions.length)await selectSession(state.sessions[0].id);updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';for(const warning of result.startup_warnings || [])toast(warning,true);}
+  try {await initialize();}
   catch(e){toast(e.message,true);}
   setInterval(poll,600);
 });
@@ -372,7 +405,7 @@ function updateVoice(voice) {
       if (input.phase !== 'dictating') {state.voiceGeneration=null;state.voiceBase=undefined;}
     }
   }
-  $('prompt').disabled = !!state.running || input.phase === 'dictating';
+  $('prompt').disabled = !!state.running || input.phase === 'dictating' || !state.initialized;
   const model = input.model || {};
   $('voice-setup-status').textContent = model.message || 'Set up offline voice to use your microphone';
   $('voice-progress').value = model.phase === 'ready' ? 100 : model.total ? Math.min(99,100*model.received/model.total) : 0;
@@ -408,3 +441,4 @@ action('composer-access',async()=>{
 $('new-agent').onclick=()=>$('agent-dialog').showModal();
 $('agent-close').onclick=()=>$('agent-dialog').close();
 $('agent-form').onsubmit=async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{const r=await call('spawn_agent',state.session,$('agent-role').value.trim(),$('agent-task').value.trim());state.sessions.unshift(r.session);$('agent-dialog').close();$('agent-task').value='';toast('Agent started');await poll();}catch(error){toast(error.message,true);}finally{button.disabled=false;}};
+initializationGate();

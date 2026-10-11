@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import urlsplit
+from glitch.redaction import MESSAGE, SESSION, event, event_payload, tool_name, CONTENT, stored_message
 
 DEFAULTS = {
     'mode': 'local', 'ollama_url': 'http://127.0.0.1:11434',
@@ -137,8 +138,8 @@ class Store:
                 self._vault = Vault(self)
             return self._vault
 
-    def redact(self, value):
-        return self.vault.redact(value)
+    def redact(self, value, schema=None):
+        return self.vault.redact(value, schema)
 
     @contextmanager
     def connect(self):
@@ -274,7 +275,7 @@ class Store:
 
     def sessions(self):
         with self.lock, self.connect() as db:
-            return self.redact([dict(r) for r in db.execute('SELECT * FROM sessions ORDER BY created_at DESC,rowid DESC')])
+            return self.redact([dict(r) for r in db.execute('SELECT * FROM sessions ORDER BY created_at DESC,rowid DESC')], [SESSION])
 
     def session(self, session):
         with self.lock, self.connect() as db:
@@ -284,7 +285,7 @@ class Store:
         return dict(row)
 
     def message(self, session, role, content):
-        content = self.redact(content)
+        content = self.redact(content, CONTENT if role == 'context' else None)
         with self.lock, self.connect() as db:
             db.execute('INSERT INTO messages(session,role,content) VALUES (?,?,?)', (session, role, content))
             if role == 'user':
@@ -292,7 +293,7 @@ class Store:
 
     def messages(self, session):
         with self.lock, self.connect() as db:
-            return self.redact([dict(r) for r in db.execute('SELECT role,content FROM messages WHERE session=? ORDER BY id', (session,))])
+            return self.redact([stored_message(dict(r)) for r in db.execute('SELECT role,content FROM messages WHERE session=? ORDER BY id', (session,))], [MESSAGE])
 
     def anchor(self, session, directive):
         with self.lock, self.connect() as db:
@@ -305,10 +306,12 @@ class Store:
     def event(self, session, kind, title, payload=None):
         with self.lock, self.connect() as db:
             cursor = db.execute('INSERT INTO events(session,kind,title,payload) VALUES (?,?,?,?)',
-                                (session, self.redact(kind), self.redact(title), json.dumps(safe_data(self.redact(payload or {})), ensure_ascii=True)))
+                                (session, self.redact(kind, event({'kind': kind})['kind']),
+                                 self.redact(title, tool_name if kind in ('tool', 'result', 'error') else None),
+                                 json.dumps(safe_data(self.redact(payload or {}, event_payload(kind, title))), ensure_ascii=True)))
             return cursor.lastrowid
 
     def events(self, session, after):
         with self.lock, self.connect() as db:
             return self.redact([dict(r) | {'payload': json.loads(r['payload'])} for r in db.execute(
-                'SELECT * FROM events WHERE session=? AND id>? ORDER BY id LIMIT 300', (session, int(after)))])
+                'SELECT * FROM events WHERE session=? AND id>? ORDER BY id LIMIT 300', (session, int(after)))], [event])

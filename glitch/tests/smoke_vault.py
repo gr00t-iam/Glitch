@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-def run(output_directory):
+def run(output_directory, recovery=False, replace=False):
     import webview
     from glitch.api import DesktopAPI
     from glitch.desktop_runtime import install_webview_cleanup_guard
@@ -25,6 +25,17 @@ def run(output_directory):
     # Retain Windows system variables needed by Winsock/WebView2, never credential overrides.
     with patch.dict(os.environ, {'CLOUD_SUPERVISOR_API_KEY': '', 'DISCORD_TOKEN': ''}), tempfile.TemporaryDirectory(prefix='glitch-vault-smoke-') as folder:
         store = Store(Path(folder) / 'data')
+        if recovery:
+            store.save_settings({'full_access': True, 'context_length': 65535, 'cpu_threads': 3,
+                                 'parallel_streams': 2, 'gpu_mode': 'cpu', 'speech_volume': 63,
+                                 'speech_rate': -2, 'audit_interval': 7, 'max_steps': 23})
+            session = store.new_session(Path(folder))
+            store.message(session, 'user', 'Retained synthetic conversation')
+            cold_item = store.vault.save('Cold fixture', 'bearer', 'https://example.test',
+                                    {'token': 'synthetic-cold-native-ONLY'})
+            with store.connect() as db:
+                db.execute('UPDATE vault SET ciphertext=? WHERE id=?', (b'corrupt-cold-native', cold_item['id']))
+            store = Store(Path(folder) / 'data')
         models = ModelClient(store)
         engine = AgentEngine(store, models)
         api = DesktopAPI(store, engine, models)
@@ -52,6 +63,41 @@ def run(output_directory):
         def probe():
             try:
                 wait_for("state.ready && document.getElementById('settings-open')")
+                if recovery:
+                    wait_for("state.recoveryRequired===true")
+                    assert window.evaluate_js("!state.initialized && document.getElementById('send').disabled && document.getElementById('composer-access').disabled")
+                    window.evaluate_js("document.getElementById('settings-open').click()")
+                    wait_for("document.getElementById('settings-dialog').open && !document.getElementById('settings-vault').hidden")
+                    assert window.evaluate_js("document.getElementById('settings-save').disabled && document.getElementById('full-access').disabled")
+                    assert window.evaluate_js("document.getElementById('access-mode').textContent==='Settings unavailable'")
+                    capture('recovery-blocked.png')
+                    for operation in (lambda: api.send(session, 'Blocked synthetic task'),
+                                      lambda: api.save_settings({'full_access': False})):
+                        try:
+                            operation()
+                            raise AssertionError('Recovery admitted task/settings submission')
+                        except ValueError:
+                            pass
+                    result['checks'].append('Cold unreadable ciphertext blocks native/UI task and settings submission and marks permissions unavailable')
+                    if replace:
+                        window.evaluate_js("document.querySelector('[data-vault-edit]').click();document.getElementById('vault-name').value='Repaired fixture';document.getElementById('vault-origin').value='https://example.test';document.getElementById('vault-secret').value='synthetic-native-repair-ONLY';document.getElementById('vault-save').click()")
+                    else:
+                        window.evaluate_js("window.confirm=()=>true;document.querySelector('[data-vault-delete]').click()")
+                    wait_for("state.initialized===true")
+                    assert window.evaluate_js("state.settings.full_access && state.settings.context_length===65535 && state.settings.cpu_threads===3 && state.settings.parallel_streams===2 && state.settings.gpu_mode==='cpu' && state.settings.speech_volume===63 && state.settings.speech_rate===-2 && state.settings.audit_interval===7 && state.settings.max_steps===23")
+                    assert window.evaluate_js("document.getElementById('full-access').checked && document.getElementById('access-mode').textContent==='Full Access' && document.getElementById('composer-access').getAttribute('aria-pressed')==='true'")
+                    assert window.evaluate_js("!document.getElementById('send').disabled && !document.getElementById('settings-save').disabled && state.sessions.length===1 && document.getElementById('messages').textContent.includes('Retained synthetic conversation')")
+                    assert store.settings()['full_access'] is True
+                    capture('recovery-restored.png')
+                    window.evaluate_js("document.getElementById('tab-tools').click()")
+                    capture('recovery-full-access.png')
+                    if replace:
+                        assert store.vault.list()[0]['id'] == cold_item['id']
+                        assert store.vault.resolve(cold_item['id'], 'https://example.test')['token'] == 'synthetic-native-repair-ONLY'
+                        assert 'synthetic-native-repair-ONLY' not in window.evaluate_js('JSON.stringify(state)')
+                    result['checks'].append(('Replacement' if replace else 'Deletion') + ' recovery completes full initialization, restores retained Full Access/settings/conversation and enables submission without overwrite')
+                    result['passed'] = True
+                    return
                 window.evaluate_js("document.getElementById('settings-open').click()")
                 wait_for("document.getElementById('settings-dialog').open")
                 assert window.evaluate_js("!!document.getElementById('tab-vault')"), 'Vault settings tab missing'
@@ -128,7 +174,9 @@ def run(output_directory):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('output_directory')
+    parser.add_argument('--recovery', action='store_true')
+    parser.add_argument('--replace', action='store_true')
     args = parser.parse_args()
-    evidence = run(args.output_directory)
+    evidence = run(args.output_directory, args.recovery or args.replace, args.replace)
     print(json.dumps(evidence, indent=2))
     raise SystemExit(0 if evidence['passed'] else 1)

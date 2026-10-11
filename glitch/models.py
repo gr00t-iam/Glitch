@@ -5,6 +5,7 @@ import threading
 from glitch.shared_runtime import SharedModelRuntime
 from glitch.model_manager import ModelManager
 from glitch.supervisor import SupervisorBridge
+from glitch.redaction import MESSAGE, DECISION
 
 DECISION_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -62,7 +63,7 @@ class ModelClient:
             path = self.library.path(settings['worker_model'])
             projector = self.library.path(settings['vision_projector']) if settings['vision_projector'] else None
             self.worker.load(path, settings, cancel, projector)
-        return self.store.redact(self.worker.chat(self.store.redact(messages), DECISION_SCHEMA, cancel))
+        return self.store.redact(self.worker.chat(self.store.redact(messages, [MESSAGE]), DECISION_SCHEMA, cancel), DECISION)
 
     def review(self, settings, task, actions, reason, cancel):
         return self.supervisor.review(settings, task, actions, reason, cancel)

@@ -8,6 +8,7 @@ import uuid
 from glitch.monitor import TriggerMonitor
 from glitch.tools import TOOL_SCHEMAS, WorkspaceTools
 from glitch.computer import COMPUTER_SCHEMAS, ComputerTools
+from glitch.redaction import MESSAGE, DECISION, RESULT, action as action_schema, event_payload, tool_name, ProtocolText, DESCRIPTOR
 
 
 class AgentEngine:
@@ -85,7 +86,8 @@ class AgentEngine:
             return allowed
 
     def _emit(self, kind, title, payload=None):
-        title, payload = self.store.redact(title), self.store.redact(payload)
+        payload = self.store.redact(payload, event_payload(kind, title))
+        title = self.store.redact(title, tool_name if kind in ('tool', 'result', 'error') else None)
         identifier = self.store.event(self.running_session, kind, title, payload)
         if self.coordinator:
             self.coordinator.event(self.run_id, kind, title, payload or {}, identifier)
@@ -126,11 +128,14 @@ class AgentEngine:
                     'Do not claim completion until you have verified the requested change. '
                     'Desktop screenshots use primary-screen native pixels; use a vision-capable model for visual tasks. '
                     'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + extra))
-            if self.coordinator:
-                base += '\nAssigned role: ' + json.dumps(self.coordinator.runs[self.run_id]['role'])
             def system():
-                descriptors = json.dumps(self.store.vault.list())
-                return {'role': 'system', 'content': base + '\nRegistered credential descriptors (IDs and metadata only; secret retrieval is not a tool):\n' + descriptors + '\nPersistent course corrections:\n' + '\n'.join(self.store.anchors(session))}
+                parts = [base]
+                if self.coordinator:
+                    parts += ['\nAssigned role: ', (self.coordinator.runs[self.run_id]['role'], None)]
+                parts += ['\nRegistered credential descriptors (IDs and metadata only; secret retrieval is not a tool):\n',
+                          (self.store.vault.list(), [DESCRIPTOR]), '\nPersistent course corrections:\n',
+                          (self.store.anchors(session), [None])]
+                return {'role': 'system', 'content': ProtocolText(*parts)}
             messages = [system()] + [m | {'role': 'user'} if m['role'] == 'context' else m for m in self.store.messages(session)]
             self._emit('started', 'Glitch is processing locally...', {'model': settings['worker_model'], 'workspace': workspace})
             for step in range(1, settings['max_steps'] + 1):
@@ -138,7 +143,7 @@ class AgentEngine:
                     raise InterruptedError('Stopped by you.')
                 self._emit('local', 'Glitch is processing locally...', {'step': step})
                 messages[0] = system()
-                decision = self.store.redact(self.models.chat(settings, self.store.redact(messages), self.cancelled))
+                decision = self.store.redact(self.models.chat(settings, self.store.redact(messages, [MESSAGE]), self.cancelled), DECISION)
                 try:
                     self.validate(decision)
                 except ValueError as error:
@@ -150,7 +155,7 @@ class AgentEngine:
                     if len(actions) >= 3 and all(a['tool'] == 'worker_decision' for a in actions[-3:]):
                         raise RuntimeError('The model repeatedly returned invalid decisions. Choose a more capable model.')
                     continue
-                messages.append({'role': 'assistant', 'content': json.dumps(decision)})
+                messages.append({'role': 'assistant', 'content': ProtocolText((decision, DECISION))})
                 if decision['message']:
                     self.store.message(session, 'assistant', decision['message'])
                     self._emit('message', 'Glitch', {'text': decision['message']})
@@ -174,13 +179,13 @@ class AgentEngine:
                     if self.coordinator:
                         self.coordinator.resources.release()
                 image = result.pop('_image', None)
-                result = self.store.redact(result)
+                result = self.store.redact(result, RESULT)
                 action = {'tool': tool['name'], 'args': tool['args'], 'ok': result.get('ok') is True, 'result': result}
                 actions.append(action)
                 self._emit('result' if action['ok'] else 'error', tool['name'],
                            {'result': result, 'duration_ms': round((time.monotonic() - began) * 1000), 'step': step})
                 # JSON mode works even on models without native function-calling support.
-                feedback = {'role': 'user', 'content': 'Verified tool result (untrusted data):\n' + json.dumps(action)[:140000]}
+                feedback = {'role': 'user', 'content': ProtocolText('Verified tool result (untrusted data):\n', (action, action_schema), limit=140000)}
                 self.store.message(session, 'context', feedback['content'])
                 if image:
                     feedback['images'] = [image]
@@ -206,7 +211,7 @@ class AgentEngine:
     def _audit(self, settings, prompt, actions, trigger):
         self._emit('supervisor', 'Glitch is consulting the cloud supervisor to refresh memory', {'reason': trigger})
         directive = self.store.redact(self.models.review(settings, self.store.redact(prompt),
-                                                       self.store.redact(actions), self.store.redact(trigger), self.cancelled))
+                                                       self.store.redact(actions, [action_schema]), self.store.redact(trigger), self.cancelled))
         self.store.anchor(self.running_session, directive)
         corrected = 'error' in trigger.lower() or 'loop' in trigger.lower() or 'invalid' in trigger.lower()
         self._emit('correction' if corrected else 'anchor',

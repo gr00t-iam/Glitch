@@ -8,6 +8,7 @@ import uuid
 from urllib.parse import urlsplit
 
 from glitch.storage import protect, redact as pattern_redact
+from glitch.redaction import boundary, DESCRIPTOR
 
 REMOVED = '[credential removed]'
 FIELDS = {
@@ -99,7 +100,7 @@ class Vault:
             items = [self._metadata(row) for row in db.execute(
                 'SELECT id,name,kind,origin,custom_ca,created_at,updated_at FROM vault ORDER BY created_at,id')]
             try:
-                return self.redact(items)
+                return self.redact(items, [DESCRIPTOR])
             except RuntimeError:
                 # Keep opaque IDs available to delete/replace unreadable ciphertext.
                 return [item | {'name': 'Credential requires recovery', 'origin': '[unavailable]'} for item in items]
@@ -187,7 +188,7 @@ class Vault:
                     raise
                 self._loaded[row['id']] = ciphertext
 
-    def redact(self, value):
+    def redact(self, value, schema=None):
         with self.store.lock, self.store.connect() as db:
             self._refresh(db)
             # Existing protected settings remain where they were; cover them too.
@@ -224,4 +225,4 @@ class Vault:
             if isinstance(item, dict):
                 return {text(str(key)): visit(child) for key, child in item.items()}
             return item
-        return visit(value)
+        return boundary(value, schema, visit)
