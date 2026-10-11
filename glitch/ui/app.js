@@ -1,6 +1,6 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
-const state = {session: null, cursor: 0, settings: {}, sessions: [], pending: null, running: null, lastRun: null, count: 0, ready: false, initialized: false, initializing: false, recoveryRequired: false, polling: false, submitting: false};
+const state = {session: null, cursor: 0, chatEventWatermark: 0, projects: [], historyBusy: false, settings: {}, sessions: [], pending: null, running: null, lastRun: null, count: 0, ready: false, initialized: false, initializing: false, recoveryRequired: false, polling: false, submitting: false};
 let librarySignature = '', modelPhase = '', transferPhase = '';
 function toast(text, error = false) {
   const node = document.createElement('div'); node.className = 'toast' + (error ? ' error' : ''); node.textContent = text;
@@ -18,6 +18,7 @@ function status(title, kind = '') {
 }
 function addMessage(role, content) {
   $('welcome')?.remove();
+  $('messages').querySelector('.empty')?.remove();
   const node = document.createElement('article'); node.className = 'message ' + role;
   const label = document.createElement('span'); label.className = 'role'; label.textContent = role === 'user' ? 'You' : 'Glitch';
   const text = document.createElement('div'); text.textContent = content; node.append(label, text); $('messages').append(node);
@@ -39,7 +40,7 @@ function addEvent(event, live = false) {
   }
   state.count++; $('event-count').textContent = String(state.count);
   if (live) {
-    if (event.kind === 'message') addMessage('assistant', event.payload.text);
+    if (event.kind === 'message' && event.chat_visible !== false && event.id > state.chatEventWatermark) addMessage('assistant', event.payload.text);
     if (['started','local','supervisor','browser','computer','completed','stopped','paused'].includes(event.kind)) status(event.title, event.kind);
     if (['correction','anchor'].includes(event.kind)) {toast(event.title); status(event.title);}
     if (event.kind === 'error') toast(event.title, true);
@@ -50,35 +51,79 @@ function addEvent(event, live = false) {
 function renderSessions() {
   const workspaceName = path => {const parts=path.split(/[\\/]/);return parts.at(-2)==='workspaces'&&parts.at(-1).startsWith('Chat-')?'Chat workspace':parts.at(-1);};
   $('sessions').replaceChildren();
-  state.sessions.forEach(session => {
+  $('projects').replaceChildren();
+  const projects = [...state.projects];
+  state.sessions.forEach(session=>{if(!projects.some(p=>p.id===session.project_id))projects.push({id:session.project_id,workspace:session.workspace});});
+  projects.forEach(project=>{
+    const row=document.createElement('div');row.className='history-row';
+    const open=document.createElement('button');open.className='session';open.textContent=workspaceName(project.workspace);open.title=project.workspace;
+    const members=state.sessions.filter(s=>s.project_id===project.id);
+    open.onclick=()=>{if(members.length)selectSession(members[0].id).catch(e=>toast(e.message,true));};
+    open.disabled=!members.length;
+    const remove=document.createElement('button');remove.textContent='\u00d7';remove.className='history-remove';remove.title='Remove project registration';remove.setAttribute('aria-label','Remove project registration');
+    remove.onclick=()=>removeHistory('project',project.id);row.append(open,remove);$('projects').append(row);
+    const group=document.createElement('section');group.className='history-group';
+    const heading=document.createElement('h3');heading.textContent=workspaceName(project.workspace);group.append(heading);
+    members.forEach(session => {
+    const row=document.createElement('div');row.className='history-row';
     const node = document.createElement('button'); node.className = 'session' + (state.session === session.id ? ' active' : '');
     const title = document.createElement('strong'); title.textContent = session.title;
     const path = document.createElement('small'); path.textContent = workspaceName(session.workspace); node.append(title, path);
-    node.title = session.workspace; node.onclick = () => selectSession(session.id).catch(e => toast(e.message, true)); $('sessions').append(node);
+    node.title = session.workspace; node.onclick = () => selectSession(session.id).catch(e => toast(e.message, true));
+    const remove=document.createElement('button');remove.textContent='\u00d7';remove.className='history-remove';remove.title='Delete conversation';remove.setAttribute('aria-label','Delete conversation');remove.onclick=()=>removeHistory('session',session.id);
+    row.append(node,remove);group.append(row);
+    });
+    if(!members.length){const empty=document.createElement('p');empty.className='empty';empty.textContent='No conversations';group.append(empty);}
+    $('sessions').append(group);
   });
+  if(!projects.length)$('projects').textContent='No registered projects';
   const active = state.sessions.find(s => s.id === state.session);
   $('project').textContent = active ? workspaceName(active.workspace) : 'Choose a project folder';
   $('project').title = active?.workspace || ''; $('workspace-path').textContent = active?.workspace || 'Choose where Glitch should work';
 }
+function emptyHistory() {
+  state.viewGeneration=(state.viewGeneration || 0)+1;
+  state.session=null;state.cursor=0;state.count=0;state.chatEventWatermark=0;
+  $('messages').replaceChildren();$('events').replaceChildren();$('event-count').textContent='0';$('prompt').value='';
+  const empty=document.createElement('p');empty.className='empty';empty.textContent='New conversation';$('messages').append(empty);
+  renderSessions();updateRuntime(state.runtime || {});
+}
+async function removeHistory(kind, identifier) {
+  if(state.historyBusy || !confirm(kind==='project'?'Remove this project registration and all its Glitch conversations? Project files and vault credentials will not be deleted.':'Permanently delete this Glitch conversation and its history? Project files and vault credentials will not be deleted.'))return;
+  state.historyBusy=true;
+  try {
+    const result=kind==='project'?await call('remove_project',identifier):await call('delete_session',identifier);
+    const b=await call('bootstrap');state.sessions=b.sessions;state.projects=b.projects;state.runtime=b.runtime;
+    if(!state.sessions.some(s=>s.id===state.session)) {
+      if(result.session)await selectSession(result.session.id);else emptyHistory();
+    } else renderSessions();
+    updateRuntime(b.runtime);
+  } catch(e){toast(e.message,true);}finally{state.historyBusy=false;}
+}
 async function selectSession(identifier) {
+  const generation=state.viewGeneration=(state.viewGeneration || 0)+1;
   if (state.voiceGeneration) restoreDictation();
   state.drafts ??= {};
   if (state.session) state.drafts[state.session] = $('prompt').value;
   await call('voice_select_session', identifier);
+  if(generation!==state.viewGeneration)return;
   state.session = identifier; state.cursor = 0; state.count = 0;
   $('prompt').value = state.drafts[identifier] || '';
   const result = await call('load_conversation', identifier);
-  if (state.session !== identifier) return;
+  if (state.session !== identifier || generation!==state.viewGeneration) return;
+  state.chatEventWatermark=result.chat_event_watermark || 0;
   $('messages').replaceChildren(); $('events').replaceChildren(); $('event-count').textContent = '0';
   result.messages.forEach(m => addMessage(m.role, m.content));
   result.events.forEach(e => {addEvent(e); state.cursor = e.id;});
   // Drain archived timeline pages without replaying assistant messages into the loaded conversation.
   while (result.events.length === 300) {
     const page = await call('poll', identifier, state.cursor);
-    if (state.session !== identifier) return;
+    if (state.session !== identifier || generation!==state.viewGeneration) return;
     result.events = page.events; page.events.forEach(e => {addEvent(e); state.cursor = e.id;});
   }
   renderSessions();
+  if(!result.messages.length){const empty=document.createElement('p');empty.className='empty';empty.textContent='No visible messages';$('messages').append(empty);}
+  if(!state.count){const empty=document.createElement('p');empty.className='empty';empty.textContent='No visible events';$('events').append(empty);}
 }
 function updateRuntime(runtime) {
   state.runtime = runtime;
@@ -103,11 +148,13 @@ function updateRuntime(runtime) {
       const heading=document.createElement('strong'),detail=document.createElement('small');
       const open=document.createElement('button');open.textContent='Open';open.onclick=async()=>{try{const b=await call('bootstrap');state.sessions=b.sessions;await selectSession(run.session);}catch(e){toast(e.message,true);}};
       const stop=document.createElement('button');stop.textContent='Stop';stop.onclick=()=>call('stop',run.id).catch(e=>toast(e.message,true));
-      row.append(heading,detail,open,stop);$('agent-deck').append(row);
+      const dismiss=document.createElement('button');dismiss.textContent='\u00d7';dismiss.title='Dismiss finished agent card';dismiss.setAttribute('aria-label','Dismiss finished agent card');dismiss.onclick=()=>call('dismiss_run',run.id).then(()=>poll()).catch(e=>toast(e.message,true));
+      row.append(heading,detail,open,stop,dismiss);$('agent-deck').append(row);
     }
     row.children[0].textContent=run.role+(run.parent_id?' · Sub-agent':'');
     row.children[1].textContent=`${run.status} · ${run.last_action||run.task}`;row.children[1].title=run.task;
     row.children[3].disabled=!runtime.active_sessions?.includes(run.session);
+    row.children[4].hidden=!['completed','stopped','paused','interrupted'].includes(run.status);
   });
   const pending = runtime.approval;
   if (pending && state.pending?.id !== pending.id) {
@@ -286,6 +333,11 @@ $('worker-model').onchange = () => {
   if (librarySignature) renderLibrary(JSON.parse(librarySignature), true);
 };
 function action(id, handler) {$(id).onclick=async()=>{const button=$(id);button.disabled=true;try{await handler();}catch(e){toast(e.message,true);}finally{button.disabled=false;}};}
+for(const [id,kind] of [['clear-chat','chat'],['clear-timeline','timeline']])action(id,async()=>{
+  if(!state.session || state.historyBusy || !confirm(kind==='chat'?'Clear the chat window? Archived model history and pending approvals remain.':'Clear the timeline? Archived evidence and pending approvals remain.'))return;
+  state.historyBusy=true;
+  try{await call('clear_view',state.session,kind);await selectSession(state.session);}finally{state.historyBusy=false;}
+});
 action('discover',()=>refreshModels(true));
 action('download-model',async()=>{await call('download_model',$('download-url').value.trim(),$('download-sha').value.trim());await refreshModels();});
 action('import-model',async()=>{await call('import_model');await refreshModels();});
@@ -335,23 +387,23 @@ async function initialize() {
       initializationGate();status(result.message || 'Saved credentials require recovery');return;
     }
     updateSettings(result.settings);await refreshModels(true);updateVoice(result.voice);populateSettings();
-    state.sessions=result.sessions;
-    if(state.sessions.length)await selectSession(state.session || state.sessions[0].id);
+    state.sessions=result.sessions;state.projects=result.projects || [];
+    if(state.sessions.length)await selectSession(state.sessions.some(s=>s.id===state.session)?state.session:state.sessions[0].id);else emptyHistory();
     state.runtime=result.runtime;state.recoveryRequired=false;state.initialized=true;
     initializationGate();$('discord-state').textContent=result.discord.message || 'Discord is disconnected';
     for(const warning of result.startup_warnings || [])toast(warning,true);
   } finally {state.initializing=false;if(!state.initialized)initializationGate();}
 }
 async function poll() {
-  if (!state.ready || state.polling || state.initializing) return;
-  state.polling=true; const identifier=state.session;
+  if (!state.ready || state.polling || state.initializing || state.historyBusy) return;
+  state.polling=true; const identifier=state.session,generation=state.viewGeneration;
   try {
     if(!state.initialized){await initialize();return;}
     await refreshModels();
     updateVoice(await call('voice_status'));
-    if (identifier) {const result=await call('poll',identifier,state.cursor); if(identifier===state.session){result.events.forEach(event=>{addEvent(event,true);state.cursor=event.id;});updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';$('discord-detail').textContent=result.discord.message || '';}}
+    if (identifier) {const result=await call('poll',identifier,state.cursor); if(identifier===state.session && generation===state.viewGeneration && !state.historyBusy){result.events.forEach(event=>{addEvent(event,true);state.cursor=event.id;});updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';$('discord-detail').textContent=result.discord.message || '';}}
     if (++ticks%10===0 || !identifier) {
-      const result=await call('bootstrap');if(!result.initialized){state.initialized=false;state.recoveryRequired=!!result.recovery_required;initializationGate();return;}state.sessions=result.sessions;updateSettings(result.settings);updateRuntime(result.runtime);renderSessions();
+      const result=await call('bootstrap');if(!result.initialized){state.initialized=false;state.recoveryRequired=!!result.recovery_required;initializationGate();return;}state.sessions=result.sessions;state.projects=result.projects || [];updateSettings(result.settings);updateRuntime(result.runtime);renderSessions();
       if(!result.runtime.runs && result.runtime.running_session && result.runtime.running_session !== state.lastRun) {
         state.lastRun=result.runtime.running_session;
         if(state.session !== state.lastRun) await selectSession(state.lastRun);

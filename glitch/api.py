@@ -54,7 +54,7 @@ class DesktopAPI:
             return {'initialized': False, 'recovery_required': True,
                     'message': 'Saved credentials require recovery. Task and settings submission is blocked until initialization completes.',
                     'vault': self.vault_list()}
-        result = {'settings': self._store.settings(), 'sessions': self._store.sessions(),
+        result = {'settings': self._store.settings(), 'sessions': self._store.sessions(), 'projects': self._store.projects(),
                 'runtime': self._engine.state(), 'discord': self._discord.status() if self._discord else {},
                 'startup_warnings': list(self._store.startup_warnings), 'voice': self.voice_status(),
                 'vault': self.vault_list(), 'initialized': True, 'recovery_required': False}
@@ -108,17 +108,48 @@ class DesktopAPI:
     def new_conversation(self, session=None):
         if self._engine.state()['running_session'] and not hasattr(self._engine, 'active_session'):
             raise ValueError('Stop the active task first.')
-        if session:
-            workspace = self._store.session(session)['workspace']
-        else:
+        from pathlib import Path
+        workspace = self._store.session(session)['workspace'] if session else None
+        if not workspace or not Path(workspace).is_dir():
             import uuid
             workspace = self._store.directory / 'workspaces' / ('Chat-' + uuid.uuid4().hex[:12])
             workspace.mkdir(parents=True, exist_ok=False)
         return self._store.session(self._store.new_session(workspace))
 
     def load_conversation(self, session):
-        self._store.session(session)
-        return {'messages': [m for m in self._store.messages(session) if m['role'] != 'context'], 'events': self._store.events(session, 0)}
+        record = self._store.session(session)
+        return {'messages': self._store.visible_messages(session), 'events': self._store.visible_events(session, 0),
+                'chat_event_watermark': record['chat_event_watermark']}
+
+    def projects(self):
+        return self._store.projects()
+
+    def _history_mutation(self, method, identifier):
+        with self._engine.lock:
+            self._require_initialized()
+            getattr(self._engine, method)(identifier)
+            sessions = self._store.sessions()
+            if self._voice_session and not any(row['id'] == self._voice_session for row in sessions):
+                if self._audio:
+                    self._audio.cancel()
+                self._voice_session = None
+            return {'ok': True, 'session': sessions[0] if sessions else None}
+
+    def delete_session(self, session):
+        return self._history_mutation('delete_session', session)
+
+    def remove_project(self, project):
+        return self._history_mutation('remove_project', project)
+
+    def clear_view(self, session, kind):
+        self._require_initialized()
+        return self._store.clear_view(session, kind)
+
+    def dismiss_run(self, identifier):
+        with self._engine.lock:
+            self._require_initialized()
+            self._engine.dismiss_run(identifier)
+        return {'ok': True}
 
     def save_settings(self, update):
         if self._engine.state()['running_session']:
@@ -215,7 +246,7 @@ class DesktopAPI:
 
     def poll(self, session, after):
         self._store.session(session)
-        return {'events': self._store.events(session, after), 'runtime': self._engine.state(),
+        return {'events': self._store.visible_events(session, after), 'runtime': self._engine.state(),
                 'discord': self._discord.status() if self._discord else {}, 'voice': self.voice_status()}
 
     def voice_status(self):

@@ -83,10 +83,13 @@ def tool(value):
                   args=arguments(value.get('name'))) if isinstance(value, dict) else None
 
 
-MESSAGE = fields('content', role=enum('system', 'user', 'assistant', 'context', 'tool'),
+MESSAGE = fields('content', id=OPAQUE, role=enum('system', 'user', 'assistant', 'context', 'tool'),
                  content=CONTENT, images=[OPAQUE])
 DECISION = fields('done', 'message', tool=tool)
-SESSION = fields('workspace', 'title', id=OPAQUE, created_at=OPAQUE)
+SESSION = fields('workspace', 'title', id=OPAQUE, project_id=OPAQUE, created_at=OPAQUE,
+                 chat_watermark=OPAQUE, timeline_watermark=OPAQUE, chat_event_watermark=OPAQUE)
+PROJECT = fields('workspace', id=OPAQUE)
+VIEW = fields(session=OPAQUE, kind=enum('chat', 'timeline'), watermark=OPAQUE)
 DESCRIPTOR = fields('name', 'origin', 'saved', id=OPAQUE, created_at=OPAQUE, updated_at=OPAQUE,
                     kind=enum('bearer', 'github', 'basic', 'browser', 'proxmox'),
                     tls=fields('verify', 'custom_ca'))
@@ -145,7 +148,7 @@ def event_payload(kind, name=None):
         return fields('step', args=arguments(name))
     return {
         'started': fields('model', 'workspace'), 'local': fields('step'),
-        'message': fields('text'), 'output': fields('text'),
+        'message': fields('text', message_id=OPAQUE), 'output': fields('text'),
         'result': fields('duration_ms', 'step', result=RESULT),
         'error': fields('duration_ms', 'step', result=RESULT),
         'completed': fields('steps'), 'supervisor': fields('reason'),
@@ -161,7 +164,7 @@ def event(value):
     if not isinstance(value, dict):
         return None
     return fields('title', title=tool_name if value.get('kind') in ('tool', 'result', 'error') else None,
-                  id=OPAQUE, session=OPAQUE, created_at=OPAQUE,
+                  id=OPAQUE, session=OPAQUE, created_at=OPAQUE, chat_visible=None,
                   kind=enum('started', 'local', 'tool', 'message', 'result', 'error', 'completed',
                             'stopped', 'paused', 'approval', 'approval_resolved', 'capture',
                             'supervisor', 'correction', 'anchor', 'output', 'browser', 'computer'),
@@ -197,13 +200,16 @@ def settings(_value):
 
 
 BOOTSTRAP = fields('initialized', 'recovery_required', 'message', settings=settings,
-                   sessions=[SESSION], runtime=RUNTIME, discord=DISCORD,
+                   sessions=[SESSION], projects=[PROJECT], runtime=RUNTIME, discord=DISCORD,
                    startup_warnings=[None], voice=VOICE, vault=[DESCRIPTOR])
 OK = fields('ok', 'message')
 BRIDGE = {
     'bootstrap': BOOTSTRAP, 'vault_save': DESCRIPTOR, 'vault_delete': OK,
     'choose_workspace': SESSION, 'new_conversation': SESSION,
-    'load_conversation': fields(messages=[MESSAGE], events=[event]),
+    'load_conversation': fields(messages=[MESSAGE], events=[event], chat_event_watermark=OPAQUE),
+    'projects': [PROJECT], 'clear_view': VIEW,
+    'delete_session': fields('ok', session=SESSION), 'remove_project': fields('ok', session=SESSION),
+    'dismiss_run': OK,
     'save_settings': settings, 'discover_models': MODELS, 'model_status': MODEL_STATUS,
     'download_model': TRANSFER, 'import_model': TRANSFER, 'load_model': OK,
     'test_supervisor': fields('ok', 'message', models=[None]), 'open_proxy_login': OK,

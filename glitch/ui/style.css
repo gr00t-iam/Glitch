@@ -26,6 +26,15 @@
 .vault-entry .pill{justify-self:start;font-size:11px}
 #vault-result{min-height:22px;overflow-wrap:anywhere}
 #vault-fields input,#vault-fields textarea,#vault-fields select{max-width:100%;min-width:0}
+.history-row{display:flex;gap:4px;align-items:center;min-width:0}
+.history-row .session{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.history-remove{flex:0 0 30px;width:30px;height:30px;padding:0;font-size:20px}
+.history-group h3{font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin:10px 0 4px}
+#projects{flex:0 1 auto;max-height:160px;min-height:30px}
+.history-heading{flex-wrap:wrap;padding:8px 16px}
+.history-heading button{width:auto;max-width:100%;font-size:11px;padding:4px 8px}
+.history-heading h2{flex:1;min-width:90px}
+.messages .empty{padding:16px}
 .settings-tabs{flex-wrap:wrap}
 #composer{background:#24282c;border-radius:20px;padding:14px 14px 10px}
 #prompt{min-height:48px;font-size:14px}

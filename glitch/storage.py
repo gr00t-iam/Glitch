@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import urlsplit
-from glitch.redaction import MESSAGE, SESSION, event, event_payload, tool_name, CONTENT, stored_message
+from glitch.redaction import MESSAGE, SESSION, PROJECT, event, event_payload, tool_name, CONTENT, stored_message
 
 DEFAULTS = {
     'mode': 'local', 'ollama_url': 'http://127.0.0.1:11434',
@@ -129,6 +129,92 @@ class Store:
             ''')
             db.execute('''UPDATE settings SET value='""' WHERE key='vision_projector'
                 AND value!='""' AND value=(SELECT value FROM settings WHERE key='worker_model')''')
+            self._migrate_history(db)
+
+    def _migrate_history(self, db):
+        db.execute('CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, workspace TEXT NOT NULL UNIQUE)')
+        columns = {row['name'] for row in db.execute('PRAGMA table_info(sessions)')}
+        for name, declaration in (('project_id', 'TEXT'), ('chat_watermark', 'INTEGER NOT NULL DEFAULT 0'),
+                                  ('timeline_watermark', 'INTEGER NOT NULL DEFAULT 0'),
+                                  ('chat_event_watermark', 'INTEGER NOT NULL DEFAULT 0')):
+            if name not in columns:
+                db.execute(f'ALTER TABLE sessions ADD COLUMN {name} {declaration}')
+        for row in db.execute('SELECT id,workspace FROM sessions WHERE project_id IS NULL').fetchall():
+            project = self._register_project(db, row['workspace'])
+            db.execute('UPDATE sessions SET project_id=? WHERE id=?', (project, row['id']))
+        # SQLite's default rowid allocator reuses the highest deleted ID. Preserve
+        # archive references and event cursors across deletion and restart instead.
+        for table in ('messages', 'events'):
+            sql = db.execute('SELECT sql FROM sqlite_master WHERE name=?', (table,)).fetchone()[0]
+            if 'AUTOINCREMENT' not in sql.upper():
+                db.execute(f'ALTER TABLE {table} RENAME TO {table}_legacy')
+                db.execute(sql.replace('INTEGER PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT'))
+                db.execute(f'INSERT INTO {table} SELECT * FROM {table}_legacy')
+                db.execute(f'DROP TABLE {table}_legacy')
+            db.execute(f'CREATE INDEX IF NOT EXISTS {table}_session_id ON {table}(session,id)')
+
+    def _register_project(self, db, workspace):
+        canonical = os.path.normcase(str(Path(workspace).resolve()))
+        row = db.execute('SELECT id FROM projects WHERE workspace=?', (canonical,)).fetchone()
+        if row:
+            return row['id']
+        identifier = str(uuid.uuid4())
+        db.execute('INSERT INTO projects VALUES(?,?)', (identifier, canonical))
+        return identifier
+
+    def projects(self):
+        with self.lock, self.connect() as db:
+            rows = [dict(row) for row in db.execute('SELECT * FROM projects ORDER BY rowid DESC')]
+        return self.redact(rows, [PROJECT])
+
+    def _delete_sessions(self, db, sessions):
+        for session in sessions:
+            for table in ('messages', 'anchors', 'events', 'agent_runs', 'checkpoints', 'context_checkpoints'):
+                if db.execute('SELECT 1 FROM sqlite_master WHERE type=\'table\' AND name=?', (table,)).fetchone():
+                    db.execute(f'DELETE FROM {table} WHERE session=?', (session,))
+            db.execute('DELETE FROM sessions WHERE id=?', (session,))
+
+    def delete_session(self, session):
+        with self.lock, self.connect() as db:
+            if not db.execute('SELECT 1 FROM sessions WHERE id=?', (session,)).fetchone():
+                raise ValueError('Conversation does not exist.')
+            self._delete_sessions(db, [session])
+
+    def remove_project(self, project):
+        with self.lock, self.connect() as db:
+            if not db.execute('SELECT 1 FROM projects WHERE id=?', (project,)).fetchone():
+                raise ValueError('Project does not exist.')
+            sessions = [row['id'] for row in db.execute('SELECT id FROM sessions WHERE project_id=?', (project,))]
+            self._delete_sessions(db, sessions)
+            db.execute('DELETE FROM projects WHERE id=?', (project,))
+
+    def clear_view(self, session, kind):
+        if kind not in ('chat', 'timeline'):
+            raise ValueError('Choose chat or timeline.')
+        with self.lock, self.connect() as db:
+            if not db.execute('SELECT 1 FROM sessions WHERE id=?', (session,)).fetchone():
+                raise ValueError('Conversation does not exist.')
+            table = 'messages' if kind == 'chat' else 'events'
+            watermark = db.execute(f'SELECT COALESCE(MAX(id),0) FROM {table} WHERE session=?', (session,)).fetchone()[0]
+            db.execute(f'UPDATE sessions SET {kind}_watermark=? WHERE id=?', (watermark, session))
+            if kind == 'chat':
+                event_id = db.execute('SELECT COALESCE(MAX(id),0) FROM events WHERE session=?', (session,)).fetchone()[0]
+                db.execute('UPDATE sessions SET chat_event_watermark=? WHERE id=?', (event_id, session))
+        return {'session': session, 'kind': kind, 'watermark': watermark}
+
+    def visible_messages(self, session):
+        watermark = self.session(session)['chat_watermark']
+        return [m for m in self.messages(session) if m['id'] > watermark and m['role'] != 'context']
+
+    def visible_events(self, session, after):
+        record = self.session(session)
+        events = self.events(session, max(int(after), record['timeline_watermark']))
+        for item in events:
+            if item['kind'] == 'message':
+                message_id = item['payload'].get('message_id')
+                item['chat_visible'] = (message_id > record['chat_watermark'] if message_id is not None
+                                        else item['id'] > record['chat_event_watermark'])
+        return events
 
     @property
     def vault(self):
@@ -270,7 +356,9 @@ class Store:
             raise ValueError('Choose a project folder.')
         session = str(uuid.uuid4())
         with self.lock, self.connect() as db:
-            db.execute('INSERT INTO sessions(id,workspace,title) VALUES (?,?,?)', (session, str(root), 'New conversation'))
+            project = self._register_project(db, root)
+            db.execute('INSERT INTO sessions(id,workspace,title,project_id) VALUES (?,?,?,?)',
+                       (session, str(root), 'New conversation', project))
         return session
 
     def sessions(self):
@@ -293,7 +381,7 @@ class Store:
 
     def messages(self, session):
         with self.lock, self.connect() as db:
-            return self.redact([stored_message(dict(r)) for r in db.execute('SELECT role,content FROM messages WHERE session=? ORDER BY id', (session,))], [MESSAGE])
+            return self.redact([stored_message(dict(r)) for r in db.execute('SELECT id,role,content FROM messages WHERE session=? ORDER BY id', (session,))], [MESSAGE])
 
     def anchor(self, session, directive):
         with self.lock, self.connect() as db:
@@ -305,6 +393,10 @@ class Store:
 
     def event(self, session, kind, title, payload=None):
         with self.lock, self.connect() as db:
+            if kind == 'message':
+                row = db.execute("SELECT id FROM messages WHERE session=? AND role='assistant' ORDER BY id DESC LIMIT 1", (session,)).fetchone()
+                if row:
+                    payload = dict(payload or {}) | {'message_id': row['id']}
             cursor = db.execute('INSERT INTO events(session,kind,title,payload) VALUES (?,?,?,?)',
                                 (session, self.redact(kind, event({'kind': kind})['kind']),
                                  self.redact(title, tool_name if kind in ('tool', 'result', 'error') else None),
