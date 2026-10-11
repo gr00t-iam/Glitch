@@ -53,6 +53,8 @@ Run the Python regression suite, build with `glitch/Glitch.spec`, then test the 
 
 Prepare pinned runtime assets using `python -m glitch.prepare_runtime` before packaging. Require frozen `--parallel-test <output> <stories15M-fixture>` and `--voice-test <output>` checks for the 1.2.0 shared/voice runtime. These use a test-only tiny-model context override and synthetic local speech fixtures; they do not prove the user's 30B capacity, actual microphone room accuracy or audible speakers. Never silently substitute the legacy serial worker when shared runtime startup fails.
 
+Version 1.2.1 supersedes the original per-agent cache design: all slots share one total context budget and a unified physical KV pool. CUDA 12.4 and CPU assets are bundled and checksum-pinned. Automatic GPU fitting must never lower the configured context. Jinja templates are enabled for production models. The actual Muse Glimmer / RTX 4090 `--gpu-test` passed with four overlapping requests, one 65,535-token pool, sibling-safe cancellation and about 18.5 GB GPU usage. Use this acceptance test on an NVIDIA host; CPU-only CI uses the pinned tiny fixture. Neither proves arbitrary autonomous task success.
+
 Desktop smoke tests use deterministic worker decisions and actual WebView2. Native inference smoke tests use real downloaded weights, not a server fixture. Simulated Discord and local HTTP supervisor tests do not establish live account integration. Label fixture-based, real native inference and live credential verification separately.
 
 Build on Windows with Python 3.12. End users need neither Python nor Node.js. Unsigned builds may trigger SmartScreen; sign release binaries when a signing identity is available.

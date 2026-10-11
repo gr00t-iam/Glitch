@@ -16,7 +16,7 @@ An optional cloud supervisor checks the local worker for errors, repeated action
 4. Choose a trusted project folder. In **Settings & connections > Model Manager**, paste a public Hugging Face GGUF file URL and click **Download model**, or import a GGUF. Select it and click **Load model**.
 5. Describe a task and review approval requests before allowing actions.
 
-Windows 10/11 x64 is the supported desktop target. The CPU inference engine and Python runtime are bundled; model weights are downloaded separately because of their size and licensing. Install Chrome for browser tasks and the appropriate project tools for test/build recipes. Unsigned releases may show a Windows SmartScreen warning.
+Windows 10/11 x64 is the supported desktop target. NVIDIA CUDA and CPU inference engines and the Python runtime are bundled; model weights are downloaded separately because of their size and licensing. Install Chrome for browser tasks and the appropriate project tools for test/build recipes. Unsigned releases may show a Windows SmartScreen warning.
 
 [First-run guide](<START HERE - How to run Glitch.md>) | [Detailed setup and build guide](glitch/README.md)
 
@@ -39,7 +39,9 @@ Try: "Inspect this project and explain how it is organized," "Run the supported 
 
 In **Settings & connections > Voice**, click **Set up offline voice** once. Use **Mic** for dictation, or opt into **Listen for Hey Glitch**. Pause briefly after the wake phrase, then speak; silence finishes your draft without sending it. Enable **Speak when a task finishes** for short speaker announcements. Both listening and announcements default off; **Mute** disables listening and stops playback. Speech processing stays on this PC.
 
-In **Model Manager**, select **Parallel streams** before loading. The model weights are shared, but each agent's context adds RAM requirements. Start another agent with **Agents +**, or ask the primary agent to delegate. Computer actions and workspace mutations are serialized for safety. The portable release is CPU-only; four long-context 30B tasks may exceed your RAM or be slow.
+In **Model Manager**, select **Parallel streams** before loading. One model and one **total shared context** pool serve all 1-4 streams: choosing 65,535 tokens does not allocate 65,535 per agent. Conversations keep independent histories while borrowing available cache space; requests wait if the combined budget fills. Automatic processing uses a compatible NVIDIA GPU when available, otherwise CPU. Computer actions and workspace mutations are serialized for safety. Muse Glimmer was verified with four concurrent requests on an RTX 4090 within 24 GB VRAM; performance and capacity still depend on model, context and hardware.
+
+The chat composer has a microphone icon for dictation, an arrow button to send, and an inline **Full access** switch. Enabling it requires confirmation; switching back restores action approvals. Automatic spoken completion reports remain in Voice settings; there is no Read reply button.
 
 ## Safety and privacy
 

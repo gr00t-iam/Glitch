@@ -21,6 +21,10 @@ if __name__ == '__main__':
             from glitch.tests.smoke_voice import run
             result = run(sys.argv[2])
             sys.exit(0 if result['passed'] else 1)
+        elif len(sys.argv) == 4 and sys.argv[1] == '--gpu-test':
+            from glitch.tests.smoke_gpu import run
+            result = run(sys.argv[2], sys.argv[3])
+            sys.exit(0 if result['passed'] else 1)
         else:
             main()
     except Exception as error:

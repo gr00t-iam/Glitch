@@ -4,12 +4,18 @@ import os
 import shutil
 import stat
 import sys
+import re
+import subprocess
 import zipfile
 from pathlib import Path
 import requests
 
 RUNTIME_URL = 'https://github.com/ggml-org/llama.cpp/releases/download/b11552/llama-b11552-bin-win-cpu-x64.zip'
 RUNTIME_SHA256 = 'c00741179811ff903b515eae28bdeef1f47af6e81c49920c4e68b62954e056d6'
+CUDA_URL = 'https://github.com/ggml-org/llama.cpp/releases/download/b11552/llama-b11552-bin-win-cuda-12.4-x64.zip'
+CUDA_SHA256 = 'e48331718aa82aa34571cfad8510e6d6b9a8e4dad11a73e065f94f212e280256'
+CUDART_URL = 'https://github.com/ggml-org/llama.cpp/releases/download/b11552/cudart-llama-bin-win-cuda-12.4-x64.zip'
+CUDART_SHA256 = '8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6'
 
 
 def safe_extract(archive: Path, destination: Path, limit: int = 1024 ** 3):
@@ -52,8 +58,25 @@ def fetch_archive(url, target, expected, cancel=None, progress=None, limit=512 *
     return actual
 
 
-def runtime_directory():
-    return Path(__file__).resolve().parent / 'runtime' / 'llama-cpp'
+def runtime_directory(backend='cpu'):
+    return Path(__file__).resolve().parent / 'runtime' / ('llama-cpp-cuda' if backend == 'cuda' else 'llama-cpp')
+
+
+def select_runtime(mode='auto'):
+    if mode not in ('auto', 'cpu', 'cuda'):
+        raise ValueError('Invalid processing backend.')
+    binary = runtime_directory('cuda') / 'llama-server.exe'
+    if mode != 'cpu' and binary.is_file():
+        try:
+            check = subprocess.run([str(binary), '--list-devices'], capture_output=True, timeout=20,
+                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            if check.returncode == 0 and re.search(rb'CUDA\d+:', check.stdout + check.stderr):
+                return binary, 'cuda'
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if mode == 'cuda':
+        raise RuntimeError('NVIDIA processing is unavailable. Check your NVIDIA driver or choose Automatic / CPU.')
+    return runtime_directory() / 'llama-server.exe', 'cpu'
 
 
 def prepare_runtime(destination=None):
@@ -74,6 +97,34 @@ def prepare_runtime(destination=None):
             if item.is_file():
                 shutil.copy2(item, destination / item.name)
         (destination / 'archive.sha256').write_text(RUNTIME_SHA256, encoding='ascii')
+        return destination
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def prepare_cuda_runtime():
+    destination = runtime_directory('cuda')
+    marker = destination / 'archive.sha256'
+    expected = CUDA_SHA256 + '\n' + CUDART_SHA256
+    if (destination / 'llama-server.exe').is_file() and marker.is_file() and marker.read_text().strip() == expected:
+        return destination
+    staging = destination.with_name(destination.name + '.staging')
+    staging.mkdir(parents=True, exist_ok=True)
+    try:
+        for name, url, checksum in [('server', CUDA_URL, CUDA_SHA256), ('dlls', CUDART_URL, CUDART_SHA256)]:
+            archive = staging / (name + '.zip')
+            fetch_archive(url, archive, checksum)
+            safe_extract(archive, staging / name)
+        destination.mkdir(parents=True, exist_ok=True)
+        server = next((staging / 'server').rglob('llama-server.exe'), None)
+        if not server:
+            raise ValueError('CUDA archive has no server executable.')
+        for file in server.parent.iterdir():
+            if file.is_file():
+                shutil.copy2(file, destination / file.name)
+        for file in (staging / 'dlls').rglob('*.dll'):
+            shutil.copy2(file, destination / file.name)
+        marker.write_text(expected, encoding='ascii')
         return destination
     finally:
         shutil.rmtree(staging, ignore_errors=True)

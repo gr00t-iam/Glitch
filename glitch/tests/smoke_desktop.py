@@ -65,6 +65,9 @@ def run(output_directory):
                 wait_for("document.querySelectorAll('.session').length === 0 && !document.getElementById('send').disabled")
                 result['checks'].append('Send is enabled on a fresh install without a project or conversation')
                 result['checks'].append('Bundled UI and native bridge initialized')
+                assert window.evaluate_js("!document.getElementById('read-reply') && document.querySelector('#microphone .icon-mic') && getComputedStyle(document.querySelector('#microphone .icon-mic')).maskImage.includes('mic.svg') && document.querySelector('#send .icon-send')")
+                assert window.evaluate_js("document.getElementById('composer-access').getAttribute('aria-pressed') === 'false'")
+                result['checks'].append('Composer renders microphone and arrow icons, inline access control, and no Read reply button')
                 install_navigation_guard(window)
                 window.evaluate_js("location.href='https://example.invalid/'")
                 time.sleep(0.3)
@@ -85,6 +88,7 @@ def run(output_directory):
                 window.evaluate_js("document.getElementById('context-length').value='65535';document.getElementById('settings-form').requestSubmit()")
                 wait_for("!document.getElementById('settings-dialog').open")
                 assert store.settings()['context_length'] == 65535
+                assert window.evaluate_js("document.getElementById('cache-allocation').textContent.includes('one 65,535-token pool')")
                 result['checks'].append('65,535-token context saves and closes Settings; invalid context leaves it open')
                 window.evaluate_js("document.getElementById('settings-open').click()")
                 wait_for("document.getElementById('settings-dialog').open")
@@ -112,9 +116,16 @@ def run(output_directory):
                 messages = store.messages(session)
                 assert any(m['role'] == 'context' for m in messages)
                 result['checks'].append('Verified tool evidence persists across turns')
-                window.evaluate_js("document.getElementById('settings-open').click();document.getElementById('tab-tools').click();document.getElementById('full-access').checked=true;document.getElementById('settings-form').requestSubmit()")
-                wait_for("!document.getElementById('settings-dialog').open && document.getElementById('access-mode').textContent === 'Full Access'")
+                wait_for("!document.getElementById('send').disabled")
+                window.evaluate_js("window.savedConfirm=window.confirm;window.confirm=()=>false;document.getElementById('composer-access').click()")
+                time.sleep(.3)
+                assert store.settings()['full_access'] is False
+                window.evaluate_js("window.confirm=()=>true;document.getElementById('composer-access').click()")
+                wait_for("document.getElementById('composer-access').getAttribute('aria-pressed') === 'true' && document.getElementById('access-mode').textContent === 'Full Access'")
+                window.evaluate_js("window.confirm=window.savedConfirm;delete window.savedConfirm")
                 assert store.settings()['full_access'] is True
+                assert window.evaluate_js("document.getElementById('full-access').checked")
+                result['checks'].append('Inline Full Access requires confirmation and synchronizes the saved permission and Settings switch')
                 previous_approvals = sum(e['kind'] == 'approval' for e in store.events(session, 0))
                 (project / 'note.txt').unlink()
                 window.evaluate_js("document.getElementById('prompt').value='Create a note again';document.getElementById('composer').requestSubmit()")
@@ -124,6 +135,11 @@ def run(output_directory):
                 assert sum(e['kind'] == 'approval' for e in store.events(session, 0)) == previous_approvals
                 assert not window.evaluate_js("document.getElementById('approval-dialog').open")
                 result['checks'].append('Full Access saves, stays visible and runs a second task without an approval popup')
+                wait_for("!document.getElementById('send').disabled")
+                window.evaluate_js("document.getElementById('composer-access').click()")
+                wait_for("document.getElementById('composer-access').getAttribute('aria-pressed') === 'false'")
+                assert store.settings()['full_access'] is False
+                result['checks'].append('Inline access control restores approval gates without opening Settings')
                 window.evaluate_js("document.getElementById('settings-open').click();document.getElementById('tab-voice').click()")
                 wait_for("!document.getElementById('settings-voice').hidden")
                 assert not window.evaluate_js("document.getElementById('wake-word-enabled').checked || document.getElementById('announce-completed').checked")

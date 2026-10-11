@@ -1,5 +1,6 @@
 """Real shared-weight concurrency and individual cancellation release gate."""
 import json
+import hashlib
 import threading
 import time
 from pathlib import Path
@@ -17,15 +18,21 @@ def run(output_directory, model_path):
     cancellations = [threading.Event() for _ in range(4)]
     threads = []
     try:
+        model = Path(model_path).resolve(strict=True)
+        if model.stat().st_size > 32 * 1024 * 1024 or hashlib.sha256(model.read_bytes()).hexdigest() != '66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739':
+            raise ValueError('Parallel fixture test requires the pinned stories15M model. Use --gpu-test for Muse Glimmer.')
         # This 15M fixture was trained at 128 tokens. Override its test-only
         # metadata to exercise large simultaneous output, not model quality.
         original = subprocess.Popen
-        with patch('glitch.shared_runtime.subprocess.Popen', side_effect=lambda argv, **kw: original(argv + ['--override-kv', 'llama.context_length=int:4096'], **kw)):
-            runtime.load(Path(model_path), DEFAULTS | {'parallel_streams': 4, 'context_length': 1024, 'cpu_threads': 2}, threading.Event())
+        with patch('glitch.shared_runtime.subprocess.Popen', side_effect=lambda argv, **kw: original(
+                [arg for arg in argv if arg != '--jinja'] + ['--no-jinja', '--override-kv', 'llama.context_length=int:8192'], **kw)):
+            runtime.load(Path(model_path), DEFAULTS | {'parallel_streams': 4, 'context_length': 8192, 'cpu_threads': 2, 'gpu_mode': 'cpu'}, threading.Event())
         pid = runtime.status()['pid']
         slots = runtime.slots()
         assert len(slots) == 4, slots
         result['slots'] = slots
+        assert runtime.status()['total_context'] == 8192
+        result['checks'].append('Four streams share one 8,192-token pool, not four separate caches')
         phrase = 'hello ' * 300
         schema = {'type': 'object', 'properties': {'text': {'type': 'string', 'enum': [phrase]}}, 'required': ['text'], 'additionalProperties': False}
         barrier = threading.Barrier(5)

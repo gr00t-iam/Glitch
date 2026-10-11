@@ -13,13 +13,13 @@ Glitch is a Windows desktop AI companion. Give it a task in plain language, watc
 
 Context length accepts up to 131,072 tokens, including 65,535, subject to model support and available RAM. **Save settings** closes the settings window after saving successfully.
 
-For unattended actions, turn on **Computer & safety > Full Access** and save. It skips individual prompts for supported tools, including authorized Discord tasks, and stays on after restart. The amber header badge shows when it is active. Turn it off to restore prompts. Workspace boundaries, protected files, command allowlists and Stop remain enforced; Full Access does not grant administrator rights.
+For unattended actions, use the **Full access** control in the chat composer, or **Computer & safety > Full Access**. Confirm when enabling it. It skips individual prompts for supported tools, including authorized Discord tasks, and stays on after restart. Turn it off to restore prompts. Workspace boundaries, protected files, command allowlists and Stop remain enforced; Full Access does not grant administrator rights.
 
 The repository's **Start Glitch.cmd** is an optional shortcut: it opens the packaged executable beside it or in `dist/`. If no executable exists, it opens the release download page. It does not start a server or install dependencies.
 
 ## Parallel agents and voice
 
-In **Model Manager**, choose **Parallel streams** (1-4) before loading. Weights are shared, but each agent's context needs extra memory. Use **Agents +** to assign another task; each card has Open and Stop controls. Start with one stream for a large model and increase only if RAM and CPU performance allow it.
+In **Model Manager**, choose **Parallel streams** (1-4) before loading. All streams share one model and one total context pool; a 65,535-token setting is not multiplied by the agent count. Automatic processing selects NVIDIA CUDA when available, with CPU fallback. Use **Agents +** to assign another task; each card has Open and Stop controls. More streams share the GPU's throughput and may slow individual answers.
 
 In **Settings & connections > Voice**, click **Set up offline voice** once. **Mic** shows your words live and places the finished transcript in the input; Send remains manual. Optionally enable **Listen for Hey Glitch**, then say that phrase, pause briefly and dictate. The default microphone listens locally only while Glitch is running. **Mute** turns hands-free off.
 
@@ -35,7 +35,8 @@ Enable **Speak when a task finishes** to hear short reports through your speaker
 
 - **No models found:** download or import a single GGUF file in Model Manager. Repository links and split model parts are not accepted.
 - **Model fails to load:** select a supported instruction-tuned GGUF that fits your RAM. Lower the context length or use a smaller quantized model. An old external-server model name is not a local GGUF file.
-- **Stop interrupts local inference:** in version 1.2.0, only the selected stream stops; other agents keep working and the model remains loaded. Reload if the entire model process failed.
+- **Stop interrupts local inference:** only the selected stream stops; other agents keep working and the model remains loaded. Reload if the entire model process failed.
+- **Muse Glimmer tried to load a CLIP model:** version 1.2.1 repairs a saved vision projector pointing at the language model itself. Leave the projector on **Text / browser DOM only** unless you have a separate compatible vision file.
 - **Download fails:** use a public, ungated HTTPS Hugging Face file URL without query parameters. Check disk space. No partial or checksum-mismatched model is added to the library.
 - **Desktop window cannot initialize:** check Microsoft Edge WebView2 Runtime.
 - **Browser task unavailable:** install Google Chrome; Glitch uses an isolated profile, not your existing browsing session.

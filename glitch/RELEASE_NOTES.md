@@ -1,4 +1,13 @@
-# Glitch 1.2.0 - Parallel agents and offline voice
+# Glitch 1.2.1 - Shared context, NVIDIA GPU and chat controls
+
+- All 1-4 streams share a single configured context pool. A 65,535 setting no longer allocates 196,605 or 262,140 tokens for sub-agents. Independent histories borrow available cache space; over-budget combined requests wait without silently truncating history.
+- Bundled NVIDIA CUDA 12.4 runtime with automatic GPU detection and layer fitting, plus CPU fallback. No external model server or CUDA toolkit installation is required.
+- Enables native GGUF Jinja templates, fixing Muse Glimmer's custom-template generation failure.
+- Repairs a saved vision projector pointing at the language model itself and prevents saving that invalid configuration again.
+- Chat composer uses a microphone icon, circular arrow Send button and inline Full Access control with confirmation. Removes Read reply; automatic spoken completion reports remain available.
+- Real Muse Glimmer / RTX 4090 acceptance: one 65,535-token pool, four simultaneously occupied CUDA slots, three sibling completions after cancelling one, roughly 18.5 GB total GPU usage. This is not a guarantee of arbitrary task quality or all model/hardware combinations.
+
+## Glitch 1.2.0 - Parallel agents and offline voice
 
 - One bundled, private shared-weight llama.cpp runtime with 1-4 real inference slots and per-agent context validation.
 - Independent agents, parent delegation, isolated approvals/histories and individual Stop controls; shared computer/workspace mutations are coordinated.

@@ -119,6 +119,8 @@ function updateSettings(settings) {
   state.settings = settings; $('mode').textContent = settings.mode === 'hybrid' ? 'Hybrid supervision' : 'Local only';
   $('access-mode').textContent = settings.full_access ? 'Full Access' : 'Ask before actions';
   $('access-mode').classList.toggle('amber', !!settings.full_access);
+  $('composer-access-label').textContent = settings.full_access ? 'Full access' : 'Ask before actions';
+  $('composer-access').setAttribute('aria-pressed', String(!!settings.full_access));
   $('access-note').textContent = settings.full_access ? 'Full Access is on. Actions run without approval prompts.' : 'Private by default. Ask before actions is on.';
   $('model-label').textContent = settings.worker_model || 'No local model selected';
   $('status-detail').textContent = settings.mode === 'hybrid' ? 'Built-in local worker · Supervisor audits on errors, loops and milestones' : 'Built-in local reasoning · Cloud audits are off';
@@ -127,6 +129,7 @@ function populateSettings() {
   const s = state.settings;
   $('full-access').checked = !!s.full_access;
   $('parallel-streams').value = s.parallel_streams || 1;
+  $('gpu-mode').value = s.gpu_mode || 'auto';
   $('wake-word-enabled').checked = !!s.wake_word_enabled;
   $('announce-completed').checked = !!s.announce_completed_tasks;
   $('speech-volume').value = s.speech_volume ?? 80; $('speech-rate').value = s.speech_rate ?? 0;
@@ -147,7 +150,7 @@ async function saveSettings() {
     parallel_streams:Number($('parallel-streams').value), wake_word_enabled:$('wake-word-enabled').checked,
     announce_completed_tasks:$('announce-completed').checked, speech_voice_id:$('speech-voice').value,
     speech_volume:Number($('speech-volume').value), speech_rate:Number($('speech-rate').value),
-    context_length:Number($('context-length').value), cpu_threads:Number($('cpu-threads').value),
+    context_length:Number($('context-length').value), cpu_threads:Number($('cpu-threads').value), gpu_mode:$('gpu-mode').value,
     temperature:Number($('temperature').value), vision_projector:$('vision-projector').value,
     supervisor_auth:$('supervisor-auth').value, supervisor_provider:$('supervisor-provider').value,
     proxy_url:$('proxy-url').value, proxy_login_url:$('proxy-login-url').value, proxy_model:$('proxy-model').value,
@@ -192,9 +195,9 @@ function renderLibrary(models, force=false) {
   for (const [id, blank, key] of [['worker-model','Choose a local model','worker_model'],['vision-projector','Text / browser DOM only','vision_projector']]) {
     const selected = $(id).value || state.settings[key] || '';
     $(id).replaceChildren(); const empty=document.createElement('option');empty.value='';empty.textContent=blank;$(id).append(empty);
-    models.forEach(model=>{const option=document.createElement('option');option.value=model.name;option.textContent=`${model.name} · ${(model.size/1024**3).toFixed(2)} GB`;$(id).append(option);});
+    models.filter(model => id !== 'vision-projector' || model.name !== $('worker-model').value).forEach(model=>{const option=document.createElement('option');option.value=model.name;option.textContent=`${model.name} · ${(model.size/1024**3).toFixed(2)} GB`;$(id).append(option);});
     if (selected && !models.some(model=>model.name===selected)) {const unavailable=document.createElement('option');unavailable.value=selected;unavailable.textContent=selected+' (not in library)';$(id).append(unavailable);}
-    $(id).value=selected;
+    $(id).value = id === 'vision-projector' && selected === $('worker-model').value ? '' : selected;
   }
 }
 async function refreshModels(force=false) {
@@ -216,6 +219,9 @@ async function refreshModels(force=false) {
     if (inference.phase==='error') toast(inference.message,true);
     modelPhase=inference.phase;
   }
+  $('worker-model').onchange = () => {
+    if (librarySignature) renderLibrary(JSON.parse(librarySignature), true);
+  };
   if (transfer.phase!==transferPhase) {
     if (transfer.phase==='complete') toast('Model saved to your local library');
     if (transfer.phase==='error') toast(transfer.message,true);
@@ -277,7 +283,7 @@ window.addEventListener('pywebviewready', async () => {
 
 function renderCache() {
   const per = Number($('context-length').value), slots = Number($('parallel-streams').value);
-  $('cache-allocation').textContent = `${slots} stream(s) × ${per.toLocaleString()} tokens = ${(slots*per).toLocaleString()} total cache tokens. Model weights are shared; each agent's context needs additional RAM.`;
+  $('cache-allocation').textContent = `${slots} stream(s) share one ${per.toLocaleString()}-token pool and one loaded model. Increasing the stream count does not multiply the context allocation.`;
 }
 $('parallel-streams').onchange = renderCache; $('context-length').addEventListener('input',renderCache);
 function restoreDictation() {
@@ -294,7 +300,8 @@ function updateVoice(voice) {
   state.voicePhase = input.phase;
   const labels = {off:'Microphone off',listening:'Listening for Hey Glitch',dictating:'Dictating...',speaking:'Glitch is speaking'};
   $('voice-state').textContent = input.error || labels[input.phase] || 'Microphone off';
-  $('microphone').textContent = input.phase === 'dictating' ? 'Stop mic' : 'Mic';
+  $('microphone').setAttribute('aria-label', input.phase === 'dictating' ? 'Stop dictation' : 'Start dictation');
+  $('microphone').title = input.phase === 'dictating' ? 'Stop dictation' : 'Start offline dictation';
   $('microphone').setAttribute('aria-pressed',String(input.phase === 'dictating'));
   $('stop-speaking').hidden = output.phase !== 'speaking';
   $('dictation-preview').hidden = input.phase !== 'dictating';
@@ -336,7 +343,13 @@ action('setup-voice',()=>call('setup_voice'));action('cancel-voice-setup',()=>ca
 action('mute-voice',async()=>{await call('mute_voice');restoreDictation();state.settings.wake_word_enabled=false;$('wake-word-enabled').checked=false;});
 action('test-voice',async()=>{await saveSettings();await call('test_voice');});
 action('stop-speaking',()=>call('stop_speaking'));action('settings-stop-speech',()=>call('stop_speaking'));
-action('read-reply',()=>{if(!state.session)throw new Error('No reply to read yet.');return call('read_latest_reply',state.session);});
+action('composer-access',async()=>{
+  if (state.runtime?.active_sessions?.length || state.running) throw new Error('Stop active tasks before changing action permissions.');
+  const enabling = !state.settings.full_access;
+  if (enabling && !confirm('Enable Full Access? Glitch can use supported computer tools without asking for each action. Only enable this for tasks you trust.')) return;
+  updateSettings(await call('save_settings',{full_access:enabling}));
+  $('full-access').checked = enabling;
+});
 $('new-agent').onclick=()=>$('agent-dialog').showModal();
 $('agent-close').onclick=()=>$('agent-dialog').close();
 $('agent-form').onsubmit=async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{const r=await call('spawn_agent',state.session,$('agent-role').value.trim(),$('agent-task').value.trim());state.sessions.unshift(r.session);$('agent-dialog').close();$('agent-task').value='';toast('Agent started');await poll();}catch(error){toast(error.message,true);}finally{button.disabled=false;}};

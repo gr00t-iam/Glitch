@@ -9,7 +9,65 @@ import time
 from collections import deque
 from pathlib import Path
 import requests
-from glitch.runtime_assets import runtime_directory
+from glitch.runtime_assets import select_runtime
+
+
+def runtime_arguments(binary, path, settings, port, backend):
+    return [str(binary), '-m', str(path), '--host', '127.0.0.1', '--port', str(port),
+            '--parallel', str(settings.get('parallel_streams', 1)), '--ctx-size', str(settings['context_length']),
+            '--kv-unified', '--cont-batching', '--cache-ram', '256', '--ctx-checkpoints', '0',
+            '--threads', str(settings['cpu_threads']), '--n-gpu-layers', 'auto' if backend == 'cuda' else '0',
+            '--fit', 'on', '--fit-target', '1024', '--flash-attn', 'auto',
+            '--no-webui', '--no-ui-mcp-proxy', '--jinja', '--slots']
+
+
+def validate_context_allocation(slots, count, total):
+    # Backends pad their one physical cache to an alignment boundary. This is
+    # not another context per agent; allow at most one 256-token padding block.
+    if len(slots) != count or any(not total <= slot.get('n_ctx', 0) < total + 256 for slot in slots):
+        raise RuntimeError('The runtime did not allocate the requested shared context. No silent reduction is allowed.')
+
+
+class ContextBudget:
+    def __init__(self, total):
+        self.total = total
+        self.condition = threading.Condition()
+        self.reservations = {}
+        self.waiters = deque()
+        self.closed = False
+
+    @property
+    def used(self):
+        with self.condition:
+            return sum(self.reservations.values())
+
+    def acquire(self, tokens, cancel):
+        if not 0 < tokens <= self.total:
+            raise ValueError('This conversation exceeds the shared context budget. Start a shorter task or reduce its history.')
+        ticket = object()
+        with self.condition:
+            self.waiters.append(ticket)
+            try:
+                while True:
+                    if cancel.is_set() or self.closed:
+                        raise InterruptedError('Stopped waiting for shared context space.')
+                    if self.waiters[0] is ticket and self.used + tokens <= self.total:
+                        self.reservations[ticket] = tokens
+                        return ticket
+                    self.condition.wait(.1)
+            finally:
+                self.waiters.remove(ticket)
+                self.condition.notify_all()
+
+    def release(self, ticket):
+        with self.condition:
+            self.reservations.pop(ticket, None)
+            self.condition.notify_all()
+
+    def close(self):
+        with self.condition:
+            self.closed = True
+            self.condition.notify_all()
 
 
 class SharedModelRuntime:
@@ -21,7 +79,8 @@ class SharedModelRuntime:
         self.url = ''
         self.signature = None
         self.active = 0
-        self.logs = deque(maxlen=20)
+        self.logs = deque(maxlen=256)
+        self.budget = None
         self.snapshot = {'phase': 'unloaded', 'name': '', 'message': 'No model loaded', 'usage': {}, 'slots': 1, 'occupied': 0}
 
     def status(self):
@@ -31,6 +90,7 @@ class SharedModelRuntime:
                 result.update(phase='error', message='Local model process stopped. Reload the model.')
             result['occupied'] = self.active
             result['pid'] = self.process.pid if self.process else None
+            result['context_reserved'] = self.budget.used if self.budget else 0
             return result
 
     def _client(self):
@@ -40,7 +100,7 @@ class SharedModelRuntime:
         return client
 
     def load(self, path, settings, cancel, projector=None):
-        signature = (str(Path(path).resolve()), settings['context_length'], settings['cpu_threads'], settings.get('parallel_streams', 1), str(projector))
+        signature = (str(Path(path).resolve()), settings['context_length'], settings['cpu_threads'], settings.get('parallel_streams', 1), settings.get('gpu_mode', 'auto'), str(projector))
         while not self.load_lock.acquire(timeout=.1):
             if cancel.is_set():
                 raise InterruptedError('Stopped during model loading.')
@@ -54,7 +114,7 @@ class SharedModelRuntime:
                     raise ValueError('Stop active streams before changing the loaded model.')
             self.close()
             path = Path(path).resolve(strict=True)
-            binary = runtime_directory() / 'llama-server.exe'
+            binary, backend = select_runtime(settings.get('gpu_mode', 'auto'))
             if not binary.is_file():
                 raise RuntimeError('The bundled local runtime is missing. Install a complete Glitch release.')
             slots = settings.get('parallel_streams', 1)
@@ -67,14 +127,16 @@ class SharedModelRuntime:
             self.url = f'http://127.0.0.1:{port}'
             environment = {k: v for k, v in os.environ.items() if not k.startswith('LLAMA_') and not any(s in k.upper() for s in ('TOKEN', 'SECRET', 'PASSWORD', 'API_KEY'))}
             environment['LLAMA_API_KEY'] = self.key
-            argv = [str(binary), '-m', str(path), '--host', '127.0.0.1', '--port', str(port),
-                    '--parallel', str(slots), '--ctx-size', str(settings['context_length'] * slots), '--no-kv-unified',
-                    '--threads', str(settings['cpu_threads']), '--n-gpu-layers', '0', '--no-webui', '--no-ui-mcp-proxy', '--no-jinja', '--slots']
+            argv = runtime_arguments(binary, path, settings, port, backend)
             if projector:
-                argv += ['--mmproj', str(Path(projector).resolve(strict=True))]
+                projector = Path(projector).resolve(strict=True)
+                if projector == path:
+                    raise ValueError('A language model cannot be its own vision projector. Choose Text / browser DOM only.')
+                argv += ['--mmproj', str(projector)]
             with self.lock:
                 self.snapshot.update(phase='loading', name=path.name, message='Loading one shared local model...', slots=slots,
-                                     context_per_agent=settings['context_length'], total_context=settings['context_length'] * slots)
+                                     total_context=settings['context_length'], backend=backend)
+                self.budget = ContextBudget(settings['context_length'])
                 self.temperature = settings['temperature']
                 self.logs.clear()
                 self.process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -96,11 +158,10 @@ class SharedModelRuntime:
                         with client.get(self.url + '/v1/models', timeout=1, allow_redirects=False) as response:
                             if response.status_code == 200:
                                 allocation = self.slots()
-                                if len(allocation) != slots or any(slot.get('n_ctx') != settings['context_length'] for slot in allocation):
-                                    raise RuntimeError('This model/runtime reduced the requested context. Choose a context supported by the model; no silent reduction is allowed.')
+                                validate_context_allocation(allocation, slots, settings['context_length'])
                                 self.signature = signature
                                 with self.lock:
-                                    self.snapshot.update(phase='ready', message=f'Ready - {slots} shared-model stream(s)')
+                                    self.snapshot.update(phase='ready', message=f'Ready - {backend.upper()} - {slots} streams sharing {settings["context_length"]:,} tokens')
                                 return
                     except requests.RequestException:
                         pass
@@ -139,7 +200,26 @@ class SharedModelRuntime:
                     item['content'] = [{'type': 'text', 'text': message['content']}] + [
                         {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + image}} for image in message['images']]
                 converted.append(item)
-            payload = {'messages': converted, 'temperature': self.temperature, 'max_tokens': 1536,
+            with self._client() as client:
+                if any(message.get('images') for message in messages):
+                    # Image token counts depend on the projector. Reserve the
+                    # whole pool for visual requests rather than undercount.
+                    required = self.budget.total
+                    output_limit = min(1536, self.budget.total // 2)
+                else:
+                    with client.post(self.url + '/apply-template', json={'messages': converted}, timeout=(5, 30), allow_redirects=False) as formatted:
+                        formatted.raise_for_status()
+                        prompt = formatted.json()['prompt']
+                    with client.post(self.url + '/tokenize', json={'content': prompt, 'add_special': True, 'parse_special': True}, timeout=(5, 30), allow_redirects=False) as counted:
+                        counted.raise_for_status()
+                        prompt_tokens = len(counted.json()['tokens'])
+                    output_limit = min(1536, self.budget.total - prompt_tokens - 32)
+                    if output_limit < 64:
+                        raise ValueError('This conversation fills the shared context. Start a shorter task; no history was silently removed.')
+                    required = prompt_tokens + output_limit + 32
+            budget = self.budget
+            ticket = budget.acquire(required, cancel)
+            payload = {'messages': converted, 'temperature': self.temperature, 'max_tokens': output_limit,
                        'stream': True, 'response_format': {'type': 'json_object', 'schema': schema}}
             pieces = []
             finished = threading.Event()
@@ -188,6 +268,8 @@ class SharedModelRuntime:
                 raise InterruptedError('Stopped.') from None
             raise
         finally:
+            if 'ticket' in locals():
+                budget.release(ticket)
             with self.lock:
                 self.active -= 1
                 self.snapshot.update(phase='generating' if self.active else 'ready', message='Processing locally...' if self.active else 'Shared local model ready')
@@ -196,6 +278,8 @@ class SharedModelRuntime:
         with self.lock:
             process, self.process = self.process, None
             self.signature = None
+            if self.budget:
+                self.budget.close()
             self.snapshot.update(phase='unloaded', name='', message='No model loaded')
         if process and process.poll() is None:
             process.terminate()

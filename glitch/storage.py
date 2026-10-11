@@ -20,7 +20,7 @@ DEFAULTS = {
     'audit_interval': 5, 'max_steps': 40,
     'discord_user_id': '', 'discord_channel_id': '',
     'context_length': 4096, 'cpu_threads': max(1, min(8, (os.cpu_count() or 2) - 1)),
-    'temperature': 0.15, 'vision_projector': '',
+    'temperature': 0.15, 'vision_projector': '', 'gpu_mode': 'auto',
     'supervisor_auth': 'api', 'supervisor_provider': 'openrouter',
     'proxy_url': 'http://127.0.0.1:8317/v1', 'proxy_login_url': 'http://127.0.0.1:8317',
     'proxy_model': '', 'full_access': False, 'parallel_streams': 1,
@@ -120,6 +120,8 @@ class Store:
                 CREATE INDEX IF NOT EXISTS message_session ON messages(session,id);
                 CREATE INDEX IF NOT EXISTS event_session ON events(session,id);
             ''')
+            db.execute('''UPDATE settings SET value='""' WHERE key='vision_projector'
+                AND value!='""' AND value=(SELECT value FROM settings WHERE key='worker_model')''')
 
     @contextmanager
     def connect(self):
@@ -145,6 +147,10 @@ class Store:
         values = {k: update.get(k, current[k]) for k in DEFAULTS}
         if values['mode'] not in ('local', 'hybrid'):
             raise ValueError('Choose local or hybrid mode.')
+        if values['gpu_mode'] not in ('auto', 'cuda', 'cpu'):
+            raise ValueError('Choose Automatic, NVIDIA GPU or CPU processing.')
+        if values['vision_projector'] and values['vision_projector'] == values['worker_model']:
+            raise ValueError('A language model cannot be its own vision projector. Choose Text / browser DOM only.')
         if values['supervisor_auth'] not in ('api', 'proxy'):
             raise ValueError('Choose developer API or authorized account bridge.')
         if values['supervisor_provider'] not in ('openrouter', 'openai', 'anthropic', 'compatible'):

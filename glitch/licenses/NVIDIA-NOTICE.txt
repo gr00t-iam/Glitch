@@ -1,0 +1,19 @@
+NVIDIA CUDA 12.4 runtime components
+
+Glitch includes unmodified NVIDIA CUDA runtime and cuBLAS redistributable
+libraries (cudart64_12.dll, cublas64_12.dll, cublasLt64_12.dll) for its private
+local inference engine. NVIDIA retains ownership of these components. They
+are not covered by the licenses of Glitch, llama.cpp or Lucide.
+
+These components are subject to the NVIDIA Software License Agreement and
+CUDA Supplement, including the license restrictions, disclaimer of warranties
+and limitation of liability. The governing terms are available at:
+https://docs.nvidia.com/cuda/archive/12.4.0/eula/index.html
+
+They are supplied solely for use by Glitch, not as a standalone CUDA toolkit.
+Do not reverse engineer, decompile or disassemble NVIDIA components, remove
+their proprietary notices, or redistribute them except as permitted by the
+governing NVIDIA terms. Glitch is not sponsored or endorsed by NVIDIA.
+
+llama.cpp is separately licensed under the MIT license (llama-cpp-LICENSE.txt).
+Lucide icons are separately licensed under ISC (lucide-LICENSE.txt).

@@ -14,3 +14,25 @@
 .agent-run strong,.agent-run small{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.agent-run small{color:#a1b0bd}.agent-run button{font-size:12px;padding:4px 10px}
 @keyframes voice-pulse{50%{box-shadow:0 0 0 3px #62cfb730}}
 @media(prefers-reduced-motion:reduce){#microphone[aria-pressed=true]{animation:none}}
+
+/* Lucide 0.468.0 icons, bundled locally under the ISC license. */
+.ui-icon{display:inline-block;width:18px;height:18px;flex:0 0 18px;background:currentColor;mask-position:center;mask-size:contain;mask-repeat:no-repeat}
+.icon-mic{mask-image:url('icons/mic.svg')}.icon-shield{mask-image:url('icons/shield-alert.svg')}.icon-send{mask-image:url('icons/arrow-up.svg')}
+#composer{background:#24282c;border-radius:20px;padding:14px 14px 10px}
+#prompt{min-height:48px;font-size:14px}
+.composer-footer{align-items:center;gap:8px}
+.composer-options{flex-shrink:0}
+.composer-actions{display:flex;gap:8px;align-items:center;min-width:0;justify-content:flex-end;flex:1}
+#model-label{min-width:0;max-width:240px;font-size:11px}
+#composer-access{display:flex;gap:7px;align-items:center;border-color:transparent;background:transparent;padding:5px 7px;min-height:32px;font-size:12px;color:var(--muted)}
+#composer-access[aria-pressed=true]{color:#efb466}
+#composer-access:hover{background:#343a40;border-color:#53616b}
+#microphone,#send{width:34px;height:34px;min-height:34px;flex:0 0 34px;border-radius:50%;padding:0;display:grid;place-items:center}
+#microphone{background:transparent;border-color:transparent}
+#microphone:hover{background:#3a4249;border-color:#56636c}
+#send{background:#4779c8;border-color:#598fe8;color:#fff}
+#send:hover{background:#5688d8}#send:disabled{background:#364552;color:#8093a3;border-color:#465562}
+.voice-strip{font-size:11px;margin-top:6px;min-height:20px}
+.voice-strip button{background:transparent;border-color:transparent;color:var(--muted);font-size:11px;min-height:24px}
+@media(max-width:1100px){#model-label{max-width:145px}}
+@media(max-width:550px){.composer-footer{flex-wrap:wrap}.composer-actions{flex-basis:100%}#model-label{max-width:calc(100% - 85px);margin-right:auto}}

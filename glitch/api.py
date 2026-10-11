@@ -52,7 +52,7 @@ class DesktopAPI:
         if update.get('speech_voice_id') and self._speech and update['speech_voice_id'] not in {v['id'] for v in self._speech.voices()}:
             raise ValueError('Choose an installed Windows voice.')
         result = self._store.save_settings(update)
-        if any(result[key] != before[key] for key in ('worker_model', 'context_length', 'cpu_threads', 'temperature', 'vision_projector', 'parallel_streams')):
+        if any(result[key] != before[key] for key in ('worker_model', 'context_length', 'cpu_threads', 'temperature', 'vision_projector', 'parallel_streams', 'gpu_mode')):
             self._models.unload()
         if self._audio and result['wake_word_enabled'] != before['wake_word_enabled']:
             self._audio.set_wake_enabled(result['wake_word_enabled'])

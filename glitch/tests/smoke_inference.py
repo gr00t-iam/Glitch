@@ -23,7 +23,9 @@ def run(output_directory, model_path):
         original = subprocess.Popen
         def launch(argv, **kwargs):
             if fixture:
-                argv = argv + ['--override-kv', 'llama.context_length=int:4096']
+                # The stories fixture has no instruction chat template. This
+                # legacy test formatter must not disable real GGUF templates.
+                argv = [arg for arg in argv if arg != '--jinja'] + ['--no-jinja', '--override-kv', 'llama.context_length=int:4096']
             return original(argv, **kwargs)
         with patch('glitch.shared_runtime.subprocess.Popen', side_effect=launch):
             worker.load(model, DEFAULTS | {'context_length': 1024, 'cpu_threads': 2, 'parallel_streams': 1}, threading.Event())
