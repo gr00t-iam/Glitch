@@ -17,6 +17,14 @@ For unattended actions, turn on **Computer & safety > Full Access** and save. It
 
 The repository's **Start Glitch.cmd** is an optional shortcut: it opens the packaged executable beside it or in `dist/`. If no executable exists, it opens the release download page. It does not start a server or install dependencies.
 
+## Parallel agents and voice
+
+In **Model Manager**, choose **Parallel streams** (1-4) before loading. Weights are shared, but each agent's context needs extra memory. Use **Agents +** to assign another task; each card has Open and Stop controls. Start with one stream for a large model and increase only if RAM and CPU performance allow it.
+
+In **Settings & connections > Voice**, click **Set up offline voice** once. **Mic** shows your words live and places the finished transcript in the input; Send remains manual. Optionally enable **Listen for Hey Glitch**, then say that phrase, pause briefly and dictate. The default microphone listens locally only while Glitch is running. **Mute** turns hands-free off.
+
+Enable **Speak when a task finishes** to hear short reports through your speakers. Choose a Windows voice, adjust volume/rate, then **Test voice**. Listening pauses during playback; **Stop speaking** cancels it. Both voice options default off.
+
 ## Optional connections
 
 - **Hybrid supervision:** configure a developer API key (OpenRouter, OpenAI or Anthropic), or a provider-authorized local account bridge in **Supervision**. Audits share the task and recent redacted action records. Subscription bridge mode requires a separately configured, authorized bridge; it is not a Claude Pro API login.
@@ -27,7 +35,7 @@ The repository's **Start Glitch.cmd** is an optional shortcut: it opens the pack
 
 - **No models found:** download or import a single GGUF file in Model Manager. Repository links and split model parts are not accepted.
 - **Model fails to load:** select a supported instruction-tuned GGUF that fits your RAM. Lower the context length or use a smaller quantized model. An old external-server model name is not a local GGUF file.
-- **Stop interrupts local inference:** reload the model before continuing. Canceling an active native generation releases the inference process.
+- **Stop interrupts local inference:** in version 1.2.0, only the selected stream stops; other agents keep working and the model remains loaded. Reload if the entire model process failed.
 - **Download fails:** use a public, ungated HTTPS Hugging Face file URL without query parameters. Check disk space. No partial or checksum-mismatched model is added to the library.
 - **Desktop window cannot initialize:** check Microsoft Edge WebView2 Runtime.
 - **Browser task unavailable:** install Google Chrome; Glitch uses an isolated profile, not your existing browsing session.

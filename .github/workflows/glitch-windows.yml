@@ -22,7 +22,9 @@ jobs:
       - name: Verify runtime and safety gates
         run: python -m unittest discover -s glitch/tests -v
       - name: Build standalone application
-        run: python -m PyInstaller --noconfirm --clean glitch/Glitch.spec
+        run: |
+          python -m glitch.prepare_runtime
+          python -m PyInstaller --noconfirm --clean glitch/Glitch.spec
       - name: Download pinned native inference test fixture
         run: |
           python -c "from pathlib import Path; from glitch.model_manager import ModelManager; m=ModelManager(Path('glitch-test-output/models')); m.download('https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf', '66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739'); m.wait(120); assert m.status()['phase']=='complete', m.status()"
@@ -34,6 +36,20 @@ jobs:
           $result = Get-Content glitch-test-output/frozen-inference/result.json -Raw | ConvertFrom-Json
           if (-not $result.passed) { throw 'Frozen native inference failed' }
           Get-Content glitch-test-output/frozen-inference/result.json
+      - name: Verify frozen shared-model concurrency
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path dist/Glitch.exe) -ArgumentList '--parallel-test', 'glitch-test-output/frozen-parallel', 'glitch-test-output/models/stories15M-q4_0.gguf' -PassThru -WindowStyle Hidden
+          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id; throw 'Parallel inference timed out' }
+          $result = Get-Content glitch-test-output/frozen-parallel/result.json -Raw | ConvertFrom-Json
+          if ($p.ExitCode -ne 0 -or -not $result.passed) { throw 'Frozen parallel inference failed' }
+          Get-Content glitch-test-output/frozen-parallel/result.json
+      - name: Verify frozen offline voice fixtures
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path dist/Glitch.exe) -ArgumentList '--voice-test', 'glitch-test-output/frozen-voice' -PassThru -WindowStyle Hidden
+          if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id; throw 'Voice smoke timed out' }
+          $result = Get-Content glitch-test-output/frozen-voice/result.json -Raw | ConvertFrom-Json
+          if ($p.ExitCode -ne 0 -or -not $result.passed) { throw 'Frozen voice fixtures failed' }
+          Get-Content glitch-test-output/frozen-voice/result.json
       - name: Record executable checksum
         run: (Get-FileHash dist/Glitch.exe -Algorithm SHA256).Hash | Set-Content dist/Glitch.exe.sha256
       - uses: actions/upload-artifact@v4

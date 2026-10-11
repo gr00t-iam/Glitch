@@ -2,7 +2,7 @@
 
 import threading
 
-from glitch.local_inference import EmbeddedWorker
+from glitch.shared_runtime import SharedModelRuntime
 from glitch.model_manager import ModelManager
 from glitch.supervisor import SupervisorBridge
 
@@ -21,7 +21,7 @@ class ModelClient:
     def __init__(self, store, worker=None):
         self.store = store
         self.library = ModelManager(store.directory / 'models')
-        self.worker = worker or EmbeddedWorker()
+        self.worker = worker or SharedModelRuntime()
         self.supervisor = SupervisorBridge(store)
         self._load_thread = None
         self._cancel_load = threading.Event()
@@ -56,10 +56,9 @@ class ModelClient:
         # Model Manager may already be loading. Wait on the agent thread, never the UI bridge.
         while self._load_thread and self._load_thread.is_alive():
             if cancel.wait(0.1):
-                self._cancel_load.set()
                 raise InterruptedError('Stopped while loading the local model.')
         state = self.worker.status()
-        if state['name'] != settings['worker_model'] or state['phase'] != 'ready':
+        if state['name'] != settings['worker_model'] or state['phase'] not in ('ready', 'generating'):
             path = self.library.path(settings['worker_model'])
             projector = self.library.path(settings['vision_projector']) if settings['vision_projector'] else None
             self.worker.load(path, settings, cancel, projector)

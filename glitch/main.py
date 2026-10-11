@@ -42,7 +42,7 @@ def main():
     from glitch.desktop_runtime import install_webview_cleanup_guard
     install_webview_cleanup_guard()
     from glitch.api import DesktopAPI
-    from glitch.engine import AgentEngine
+    from glitch.orchestration import AgentCoordinator
     from glitch.models import ModelClient
     from glitch.storage import Store
     from glitch.discord_bot import DiscordGateway
@@ -52,8 +52,20 @@ def main():
     # Environment overrides are optional. They never enter UI responses or conversation history.
     store.import_environment()
     models = ModelClient(store)
-    engine = AgentEngine(store, models)
+    engine = AgentCoordinator(store, models)
     api = DesktopAPI(store, engine, models)
+    from glitch.audio import AudioCoordinator
+    from glitch.speech_output import SpeechOutputService
+    def voice_conversation():
+        if not api._voice_session:
+            api._voice_session = api.new_conversation()['id']
+        return api._voice_session
+    api._audio = AudioCoordinator(store.directory, voice_conversation)
+    api._speech = SpeechOutputService(api._audio, store.settings,
+                                     lambda: [store.supervisor_key(), store.discord_token(), store.proxy_token()])
+    unsubscribe = engine.subscribe_completion(api._speech.on_completed)
+    if store.settings()['wake_word_enabled'] and api._audio.models.model_path():
+        api._audio.set_wake_enabled(True)
     api._discord = DiscordGateway(store, engine)
     assets = Path(__file__).resolve().parent / 'ui'
     window = webview.create_window('Glitch - Your local agent companion',
@@ -62,8 +74,12 @@ def main():
     api._window = window
     window.events.loaded += lambda: install_navigation_guard(window)
     def close():
-        engine.stop()
+        unsubscribe()
+        api._audio.mute()
+        api._speech.close()
+        api._audio.close()
         api._discord.stop()
+        engine.close()
         models.close()
     window.events.closed += close
     webview.start(gui='edgechromium', private_mode=True, debug=False)

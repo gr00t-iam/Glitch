@@ -23,7 +23,9 @@ DEFAULTS = {
     'temperature': 0.15, 'vision_projector': '',
     'supervisor_auth': 'api', 'supervisor_provider': 'openrouter',
     'proxy_url': 'http://127.0.0.1:8317/v1', 'proxy_login_url': 'http://127.0.0.1:8317',
-    'proxy_model': '', 'full_access': False,
+    'proxy_model': '', 'full_access': False, 'parallel_streams': 1,
+    'wake_word_enabled': False, 'announce_completed_tasks': False,
+    'speech_voice_id': '', 'speech_volume': 80, 'speech_rate': 0,
 }
 
 
@@ -157,6 +159,14 @@ class Store:
             raise ValueError('Context length must be between 1024 and 131072 tokens.')
         if type(values['full_access']) is not bool:
             raise ValueError('Full Access must be explicitly on or off.')
+        for key in ('wake_word_enabled', 'announce_completed_tasks'):
+            if type(values[key]) is not bool:
+                raise ValueError('Voice settings must be explicitly on or off.')
+        for key, low, high in (('parallel_streams', 1, 4), ('speech_volume', 0, 100), ('speech_rate', -10, 10)):
+            if type(values[key]) is not int or not low <= values[key] <= high:
+                raise ValueError(f'{key} must be between {low} and {high}.')
+        if not isinstance(values['speech_voice_id'], str) or len(values['speech_voice_id']) > 500:
+            raise ValueError('Invalid speech voice.')
         if not 1 <= values['cpu_threads'] <= 128 or not 0 <= values['temperature'] <= 2:
             raise ValueError('Use 1-128 CPU threads and a temperature between 0 and 2.')
         for name in ('ollama_url', 'supervisor_url'):

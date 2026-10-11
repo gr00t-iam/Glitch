@@ -1,5 +1,9 @@
 @echo off
 cd /d "%~dp0"
+if exist "dist\Glitch-1.2.0\Glitch.exe" (
+  start "" "%~dp0dist\Glitch-1.2.0\Glitch.exe"
+  exit /b 0
+)
 if exist "dist\Glitch.exe" (
   start "" "%~dp0dist\Glitch.exe"
   exit /b 0

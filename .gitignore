@@ -21,3 +21,5 @@ __pycache__/
 build/
 glitch-test-output/
 Glitch.exe
+glitch/runtime/
+glitch-verification/

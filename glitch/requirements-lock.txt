@@ -46,3 +46,10 @@ typing_extensions==4.16.0
 urllib3==2.8.0
 websocket-client==1.9.0
 yarl==1.25.1
+vosk==0.3.45
+sounddevice==0.5.6
+comtypes==1.4.17
+srt==3.5.3
+tqdm==4.70.1
+websockets==17.2
+colorama==0.4.6

@@ -15,7 +15,10 @@ The supported application is **`glitch/`**, not the retained React/Vite or Elect
 | `api.py` | Narrow UI-to-Python bridge; no raw filesystem or shell exposure. |
 | `engine.py` | Background worker loop, bounded steps, cancellation, approvals, verified evidence and anchors. |
 | `models.py` | Embedded-worker facade and model lifecycle coordination. |
-| `local_inference.py` | Persistent isolated CPU inference process; cancellation and native crash recovery. |
+| `shared_runtime.py`, `runtime_assets.py` | Pinned private llama.cpp server; shared weights, 1-4 cancellable slots, verified context allocation. |
+| `orchestration.py`, `resources.py` | Independent persistent run metadata, delegation, approvals and shared desktop/workspace coordination. |
+| `audio.py`, `voice_models.py`, `speech_output.py` | Opt-in offline dictation/wake activation, verified speech weights, local SAPI reports and capture/playback exclusion. |
+| `local_inference.py` | Retained serial adapter used by legacy regression checks, not the shipped default. |
 | `model_manager.py` | Async public Hugging Face downloads/imports, integrity checks, atomic publication and local catalog. |
 | `supervisor.py` | OpenAI-compatible/native Anthropic APIs and authorized loopback bridge. |
 | `monitor.py` | Audits after configured steps, errors or repeated actions. |
@@ -30,7 +33,7 @@ Data belongs under `%LOCALAPPDATA%\Glitch`, never the temporary executable extra
 
 ## Invariants
 
-- Require explicit approval for writes, command execution, browser/desktop actions and screenshots.
+- Require explicit approval for writes, commands, browser/desktop actions and screenshots unless the user explicitly enables Full Access. Full Access never bypasses validation, protected paths or ownership.
 - Supervisor advice must never grant privileges or bypass approval.
 - Reject workspace traversal, protected credential paths, arbitrary shell strings and stale approvals.
 - Preserve complete conversation context, verified tool evidence and persistent correction anchors across turns.
@@ -42,10 +45,13 @@ Data belongs under `%LOCALAPPDATA%\Glitch`, never the temporary executable extra
 - Never spoof consumer OAuth clients or collect account passwords, cookies or subscription session tokens. The local bridge owns authorized sign-in and provider entitlement.
 - Model files are data, not guaranteed safe inputs. Process isolation protects UI stability, not the operating system. Download only trusted publishers.
 - No silent history truncation: a context overflow pauses with an error. Choose a larger window or a new task.
+- Voice audio remains in RAM; wake listening requires explicit opt-in, never an agent tool or Discord command. Dictation never auto-submits. Speaker playback closes capture before speaking and re-arms only previously consented wake listening.
 
 ## Release verification
 
 Run the Python regression suite, build with `glitch/Glitch.spec`, then test the frozen UI and an ordinary startup/shutdown. Run `Glitch.exe --inference-test <output-directory> <real-gguf-path>` to verify the bundled native DLLs, structured generation, process spawn and unload. Exercise the disposed-WebView close case to catch framework lifecycle exceptions.
+
+Prepare pinned runtime assets using `python -m glitch.prepare_runtime` before packaging. Require frozen `--parallel-test <output> <stories15M-fixture>` and `--voice-test <output>` checks for the 1.2.0 shared/voice runtime. These use a test-only tiny-model context override and synthetic local speech fixtures; they do not prove the user's 30B capacity, actual microphone room accuracy or audible speakers. Never silently substitute the legacy serial worker when shared runtime startup fails.
 
 Desktop smoke tests use deterministic worker decisions and actual WebView2. Native inference smoke tests use real downloaded weights, not a server fixture. Simulated Discord and local HTTP supervisor tests do not establish live account integration. Label fixture-based, real native inference and live credential verification separately.
 

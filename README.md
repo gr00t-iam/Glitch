@@ -31,9 +31,15 @@ Windows 10/11 x64 is the supported desktop target. The CPU inference engine and 
 | Computer and Chrome control | Approve clicks, typing, scrolling, browser navigation and screenshots. |
 | Execution timeline | See verified tool results, file changes, command output and corrections. |
 | Persistent conversations | Resume conversations and their verified evidence and correction anchors after restarting. |
+| Parallel agents | Choose 1-4 shared-model streams and start independent tasks with separate conversations and Stop controls. |
+| Offline voice | Live dictation, optional Hey Glitch activation and spoken completion reports using Windows voices. |
 | Private Discord control | Assign tasks and approve actions remotely through a bot restricted to your User ID and optional private channel. |
 
 Try: "Inspect this project and explain how it is organized," "Run the supported tests and investigate failures," or "Draft a change to this file and show me the diff."
+
+In **Settings & connections > Voice**, click **Set up offline voice** once. Use **Mic** for dictation, or opt into **Listen for Hey Glitch**. Pause briefly after the wake phrase, then speak; silence finishes your draft without sending it. Enable **Speak when a task finishes** for short speaker announcements. Both listening and announcements default off; **Mute** disables listening and stops playback. Speech processing stays on this PC.
+
+In **Model Manager**, select **Parallel streams** before loading. The model weights are shared, but each agent's context adds RAM requirements. Start another agent with **Agents +**, or ask the primary agent to delegate. Computer actions and workspace mutations are serialized for safety. The portable release is CPU-only; four long-context 30B tasks may exceed your RAM or be slow.
 
 ## Safety and privacy
 

@@ -21,7 +21,24 @@ Transfers check GGUF headers, expected length and optional publisher SHA256. Can
 
 The portable build uses CPU inference, not automatic CUDA acceleration. Configure CPU threads, temperature and context before loading. Context settings accept 1,024-131,072 tokens, including 65,535. Your model must support the chosen context and your PC must have enough RAM for its cache. Large contexts use more memory. Unsupported architectures or insufficient RAM produce a visible error. There is no hidden fallback to an external model server. Context overflow pauses rather than silently dropping conversation history or correction anchors. **Save settings** closes the dialog only after a successful save; Load and connection-test buttons keep it open.
 
-Inference runs in a persistent isolated child process. Stop interrupts native inference by terminating that process; reload before continuing. Unload and shutdown release it. A model-process crash does not close the dashboard. This isolation protects stability, not the operating system: use trusted model publishers.
+Inference runs in one private, bundled llama.cpp server process with 1-4 real continuous-batching slots sharing the model weights. No external server setup is required. Choose Parallel streams before loading. Context is per agent; total cache allocation is displayed and checked against the server. Unsupported reduced allocations fail visibly. Stop closes only the chosen generation request; siblings continue and the cancelled slot is reusable. Unload and shutdown release the owned process. This isolation protects stability, not the operating system: use trusted model publishers. The bundled legacy chat-template parser supports schema-constrained decisions; models requiring unsupported custom Jinja templates may fail visibly.
+
+## Parallel agents
+
+Use **Agents +** to assign a name/role and independent task in the selected workspace. Each agent has its own conversation, history, supervisor anchors, approval and Stop control. Open its card to follow the timeline. You can also ask a primary agent to delegate: `spawn_subagent` and `await_subagent` return child results to the parent. Children cannot delegate recursively. The parent counts against the configured 1-4 agent limit; excess requests are rejected, not silently queued.
+
+Desktop/browser actions use one cancellation-aware lock; workspace writes and command recipes are serialized per canonical workspace. No resource lock is held while waiting for approval. Full Access and all existing validation apply to every agent. Four streams do not mean four copies of the GGUF, but four caches may still exceed memory. CPU throughput is shared. Tasks interrupted by application exit are recorded as interrupted on restart, not automatically resumed.
+
+## Voice
+
+Open **Settings & connections > Voice > Set up offline voice** for a one-time verified download of Vosk's small English recognizer (~40 MB). Its publisher download SHA256 is pinned from the observed archive; this is integrity pinning, not a signed publisher attestation. The speech model lives under `%LOCALAPPDATA%\Glitch\voice` and does not use an agent slot.
+
+- **Mic** starts/stops dictation on the default Windows input device. Interim words appear in a preview; finalized text enters your draft without automatically sending it. Cancel preserves the original typed draft. Silence stops after two seconds following speech; recordings are capped at 120 seconds and audio remains in memory only.
+- **Listen for Hey Glitch** is optional and off by default. It keeps your default microphone open locally while Glitch runs. Say the phrase, pause briefly, then dictate. The listening indicator remains visible; **Mute** turns the persisted listening option off. Wake recognition uses a constrained phrase recognizer, not speaker identity authentication, and may miss accents or falsely activate in noisy rooms. It never executes a task on its own.
+- **Speak when a task finishes** is optional and off by default. Installed Windows SAPI voices report short parent-task completions. Configure voice, volume and speed, use **Test voice**, **Read reply** or **Stop speaking**. Code blocks, URLs, known keys and terminal payloads are excluded from automatic reports; redaction is not a universal secret detector.
+- Speaker playback closes capture first. Completion reports wait for dictation to finish; afterward only explicitly opted-in wake listening re-arms. Microphone denial or device loss shows an error; check Windows microphone privacy/device settings and use Mic to retry.
+
+Synthetic positive/negative wake and dictation fixtures, native UI draft handling, and frozen speech DLL/model loading are release checks. Actual microphone accuracy in your room and audible speaker output require your enabled device test. No cloud speech service or browser SpeechRecognition is used.
 
 Screenshot reasoning requires a compatible **LLaVA 1.5 model and projector GGUF**, both selected in Model Manager. Other vision formats are not automatically supported. Text models cannot pretend to inspect screenshots; they can use browser DOM/text tools. Model quality still determines reasoning and visual accuracy.
 
@@ -94,6 +111,7 @@ Only developers need **Python 3.12 x64**. Double-click **Build Glitch.cmd**, or 
 py -3.12 -m venv .venv-glitch
 .\.venv-glitch\Scripts\python.exe -m pip install -r glitch\requirements-lock.txt
 .\.venv-glitch\Scripts\python.exe -m unittest discover -s glitch\tests -v
+.\.venv-glitch\Scripts\python.exe -m glitch.prepare_runtime
 .\.venv-glitch\Scripts\python.exe -m PyInstaller --noconfirm --clean glitch\Glitch.spec
 ```
 
@@ -106,9 +124,11 @@ For source development, run `.\.venv-glitch\Scripts\python.exe -m glitch.main`. 
 ```powershell
 dist\Glitch.exe --inference-test glitch-test-output\inference C:\Models\your-model.gguf
 dist\Glitch.exe --smoke-test glitch-test-output\desktop
+dist\Glitch.exe --parallel-test glitch-test-output\parallel glitch-test-output\models\stories15M-q4_0.gguf
+dist\Glitch.exe --voice-test glitch-test-output\voice
 ```
 
-Each writes `result.json` to its output directory. The inference test loads real weights, generates schema-constrained JSON without HTTP and unloads the child process. The native UI test uses deterministic worker decisions for settings, approvals, navigation protection and lifecycle checks. A tiny test model proves packaging, not long-horizon agent quality. Paid/API/subscription and Discord checks with live accounts require your credentials; fixture tests are not live account validation.
+Each writes `result.json` to its output directory. The legacy inference test checks the retained single-worker adapter. The parallel test verifies the shipped shared runtime with four real occupied slots, one PID, individual cancellation and slot reuse. Its tiny fixture receives a test-only training-context metadata override, never applied to production models. The native UI test uses deterministic worker decisions for settings, approvals, live voice draft handling, navigation protection and lifecycle checks. Voice tests use synthetic local WAVs, never microphone capture or speaker playback. Tiny model and synthetic fixture success do not establish long-horizon model quality, 30B RAM capacity, noisy-room recognition or audible output. Paid/API/subscription and Discord checks with live accounts require your credentials.
 
 ## Source structure
 
@@ -119,7 +139,14 @@ glitch/
   api.py               Narrow trusted UI-to-Python bridge
   storage.py           SQLite history/evidence/anchors and Windows DPAPI
   models.py            Embedded worker facade and lifecycle coordination
-  local_inference.py   Isolated llama.cpp process and schema-constrained decisions
+  shared_runtime.py    One owned llama.cpp server and cancellable inference slots
+  runtime_assets.py    Pinned build download and confined extraction
+  orchestration.py     Independent agent runs, delegation and completion callbacks
+  resources.py         Shared host desktop/workspace coordination
+  audio.py             Offline capture, dictation/wake states and playback exclusion
+  voice_models.py      Verified one-time offline speech model setup
+  speech_output.py     Local SAPI reports, filtering and speaker controls
+  local_inference.py   Legacy single-worker adapter retained for regression tests
   model_manager.py     Background GGUF download/import and local catalog
   supervisor.py        Native/API and authorized loopback bridge transport
   monitor.py           Step, error and loop triggers

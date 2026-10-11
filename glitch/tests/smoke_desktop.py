@@ -124,6 +124,22 @@ def run(output_directory):
                 assert sum(e['kind'] == 'approval' for e in store.events(session, 0)) == previous_approvals
                 assert not window.evaluate_js("document.getElementById('approval-dialog').open")
                 result['checks'].append('Full Access saves, stays visible and runs a second task without an approval popup')
+                window.evaluate_js("document.getElementById('settings-open').click();document.getElementById('tab-voice').click()")
+                wait_for("!document.getElementById('settings-voice').hidden")
+                assert not window.evaluate_js("document.getElementById('wake-word-enabled').checked || document.getElementById('announce-completed').checked")
+                window.evaluate_js("document.getElementById('settings-close').click()")
+                # Synthetic snapshots verify rendering without opening a microphone.
+                window.evaluate_js("document.getElementById('prompt').value='Typed first'; updateVoice({input:{phase:'dictating',conversation_id:state.session,generation_id:'fixture-voice',final:'hello',interim:'world',model:{}},output:{phase:'off',voices:[]}})")
+                assert window.evaluate_js("!document.getElementById('dictation-preview').hidden && document.getElementById('dictation-text').textContent==='world' && document.getElementById('prompt').value==='Typed first hello'")
+                window.evaluate_js("updateVoice({input:{phase:'off',conversation_id:state.session,generation_id:'fixture-voice',final:'hello world',interim:'',model:{}},output:{phase:'off',voices:[]}})")
+                assert window.evaluate_js("document.getElementById('dictation-preview').hidden && document.getElementById('prompt').value==='Typed first hello world'")
+                assert not engine.state()['running_session']
+                window.evaluate_js("document.getElementById('prompt').value='Keep me';updateVoice({input:{phase:'dictating',conversation_id:state.session,generation_id:'cancel-voice',final:'discard',interim:'',model:{}},output:{phase:'off',voices:[]}});restoreDictation()")
+                assert window.evaluate_js("document.getElementById('prompt').value==='Keep me'")
+                window.evaluate_js("state.voicePhase='off';updateRuntime({running_session:null,approval:null,runs:[{id:'a',session:state.session,role:'Researcher',status:'completed',task:'Check files'}],active_sessions:[],capacity:4})")
+                assert window.evaluate_js("document.querySelectorAll('.agent-run').length===1 && document.getElementById('stream-count').textContent==='0 / 4'")
+                result['checks'].append('Voice preview streams partial text, preserves typed draft, finalizes without Send, and Cancel restores the draft')
+                result['checks'].append('Voice opt-ins default off and independent agent cards render')
                 layout = window.evaluate_js("(()=>{const a=document.querySelector('.sidebar').getBoundingClientRect(),b=document.querySelector('main').getBoundingClientRect(),c=document.querySelector('.timeline').getBoundingClientRect();return {width:innerWidth,height:innerHeight,sidebar:a.right,main:b.left,timeline:c.width,owl:document.querySelector('.brand img').naturalWidth,overflow:document.documentElement.scrollWidth>innerWidth}})()")
                 assert layout['sidebar'] <= layout['main'] and layout['owl'] > 0 and not layout['overflow'], layout
                 result['layout'] = layout

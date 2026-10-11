@@ -7,6 +7,8 @@ if errorlevel 1 goto failed
 if errorlevel 1 goto failed
 ".venv-glitch\Scripts\python.exe" -m unittest discover -s glitch\tests -v
 if errorlevel 1 goto failed
+".venv-glitch\Scripts\python.exe" -m glitch.prepare_runtime
+if errorlevel 1 goto failed
 ".venv-glitch\Scripts\python.exe" -m PyInstaller --noconfirm --clean glitch\Glitch.spec
 if errorlevel 1 goto failed
 echo.

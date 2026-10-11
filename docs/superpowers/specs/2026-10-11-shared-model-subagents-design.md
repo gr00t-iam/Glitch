@@ -1,6 +1,6 @@
 # Glitch: One Shared Model, Up To Four Sub-Agents
 
-Status: Design proposed for user review. Not implemented in Glitch 1.1.2.
+Status: Shared-model design approved by the user on 2026-10-11. Not implemented in Glitch 1.1.2. Voice input/output is a separate design addendum for review.
 
 ## Intent
 
@@ -11,7 +11,7 @@ The user selected **Share one model across up to four agents**. Glitch must rema
 - Bundle a pinned Windows CPU build of llama.cpp's `llama-server` and required DLLs in the executable. Verify the upstream archive checksum in local and CI builds and retain its license. Glitch starts and stops its private child automatically.
 - Load the selected GGUF once. Configure 1-4 continuous-batching inference slots. Each slot has independent request state; all slots use the same weights. Default to one slot to preserve current memory requirements.
 - Keep configured context length **per agent**, not divided silently by the slot count. Allocate the appropriate total context pool for the pinned server version. Show the total token-cache allocation before loading. Four 65,535-token slots require a much larger cache than one; shared weights do not eliminate cache memory.
-- Bind only to loopback, authenticate every request with a random per-launch secret, disable public UI access and proxy/environment redirects, and expose no endpoint to Discord clients. The frontend communicates only through the existing native bridge.
+- Bind only to loopback, authenticate model/control requests with a random per-launch secret, disable public UI access and proxy/environment redirects, and expose no endpoint to Discord clients. The server's generic health endpoint may be unauthenticated; verify owned process identity and an authenticated model request before trusting readiness. The frontend communicates only through the existing native bridge.
 - Reject startup if the binary, GGUF, context allocation or endpoint health check fails. Never silently fall back to sequential generation and label it parallel.
 
 The upstream implementation documents parallel slots and shared batching in [llama.cpp server documentation](https://github.com/ggml-org/llama.cpp/tree/master/tools/server). Pin and test a specific version; do not build against changing `master` behavior.

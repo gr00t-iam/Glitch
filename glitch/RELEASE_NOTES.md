@@ -1,4 +1,15 @@
-# Glitch 1.1.2 - Context and action permissions
+# Glitch 1.2.0 - Parallel agents and offline voice
+
+- One bundled, private shared-weight llama.cpp runtime with 1-4 real inference slots and per-agent context validation.
+- Independent agents, parent delegation, isolated approvals/histories and individual Stop controls; shared computer/workspace mutations are coordinated.
+- Offline English dictation with live preview, draft preservation, Cancel and no automatic task submission.
+- Optional local Hey Glitch listening, default off, with visible state and global mute.
+- Optional Windows-voice completion announcements, voice/rate/volume controls, Test/Read/Stop, known-secret redaction and microphone/playback exclusion.
+- Existing settings/models/conversations retained. Single Windows executable; no external inference server or terminal needed.
+
+Hardware caveats: CPU-only release. Shared weights do not eliminate per-agent cache memory. Synthetic voice fixtures do not prove human/noisy-room accuracy or audible speaker playback. Custom Jinja-only chat templates are not supported by this release's schema parser.
+
+## Glitch 1.1.2 - Context and action permissions
 
 - Context settings now accept 1,024-131,072 tokens, including 65,535. Actual model support and available RAM still determine what can load.
 - Adds an explicit Full Access switch under Computer & safety. It is off by default and saved locally. When enabled, supported tool actions run without individual approval prompts, including authorized Discord tasks.

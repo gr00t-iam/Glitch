@@ -60,7 +60,12 @@ function renderSessions() {
   $('project').title = active?.workspace || ''; $('workspace-path').textContent = active?.workspace || 'Choose where Glitch should work';
 }
 async function selectSession(identifier) {
+  if (state.voiceGeneration) restoreDictation();
+  state.drafts ??= {};
+  if (state.session) state.drafts[state.session] = $('prompt').value;
+  await call('voice_select_session', identifier);
   state.session = identifier; state.cursor = 0; state.count = 0;
+  $('prompt').value = state.drafts[identifier] || '';
   const result = await call('load_conversation', identifier);
   if (state.session !== identifier) return;
   $('messages').replaceChildren(); $('events').replaceChildren(); $('event-count').textContent = '0';
@@ -75,11 +80,33 @@ async function selectSession(identifier) {
   renderSessions();
 }
 function updateRuntime(runtime) {
-  state.running = runtime.running_session;
+  state.runtime = runtime;
+  state.running = runtime.active_sessions ? (runtime.active_sessions.includes(state.session) ? state.session : null) : runtime.running_session;
   const busy = !!state.running || state.submitting;
-  $('stop').disabled = !state.running; $('send').disabled = busy || !state.ready;
-  $('choose').disabled = busy; $('new').disabled = busy;
-  $('prompt').disabled = busy;
+  const full = runtime.active_sessions && runtime.active_sessions.length >= runtime.capacity;
+  $('new-agent').disabled = !!full || !state.ready;
+  $('stop').disabled = !state.running; $('send').disabled = busy || full || !state.ready;
+  $('choose').disabled = state.submitting; $('new').disabled = state.submitting;
+  $('prompt').disabled = busy || state.voicePhase === 'dictating';
+  const runs = runtime.runs || [];
+  $('stream-count').textContent = `${(runtime.active_sessions || (state.running ? [state.running] : [])).length} / ${runtime.capacity || 1}`;
+  const visibleRuns = runs.filter(r=>runtime.active_sessions?.includes(r.session));
+  visibleRuns.push(...runs.filter(r=>!runtime.active_sessions?.includes(r.session)).slice(-Math.max(0,8-visibleRuns.length)));
+  const wanted = new Set(visibleRuns.map(r=>r.id));
+  [...$('agent-deck').children].forEach(row=>{if(!wanted.has(row.dataset.run))row.remove();});
+  visibleRuns.forEach(run => {
+    let row = [...$('agent-deck').children].find(n=>n.dataset.run===run.id);
+    if (!row) {
+      row = document.createElement('div'); row.className = 'agent-run';row.dataset.run=run.id;
+      const heading=document.createElement('strong'),detail=document.createElement('small');
+      const open=document.createElement('button');open.textContent='Open';open.onclick=async()=>{try{const b=await call('bootstrap');state.sessions=b.sessions;await selectSession(run.session);}catch(e){toast(e.message,true);}};
+      const stop=document.createElement('button');stop.textContent='Stop';stop.onclick=()=>call('stop',run.id).catch(e=>toast(e.message,true));
+      row.append(heading,detail,open,stop);$('agent-deck').append(row);
+    }
+    row.children[0].textContent=run.role+(run.parent_id?' · Sub-agent':'');
+    row.children[1].textContent=`${run.status} · ${run.last_action||run.task}`;row.children[1].title=run.task;
+    row.children[3].disabled=!runtime.active_sessions?.includes(run.session);
+  });
   const pending = runtime.approval;
   if (pending && state.pending?.id !== pending.id) {
     state.pending = pending; $('approval-title').textContent = pending.action;
@@ -99,6 +126,11 @@ function updateSettings(settings) {
 function populateSettings() {
   const s = state.settings;
   $('full-access').checked = !!s.full_access;
+  $('parallel-streams').value = s.parallel_streams || 1;
+  $('wake-word-enabled').checked = !!s.wake_word_enabled;
+  $('announce-completed').checked = !!s.announce_completed_tasks;
+  $('speech-volume').value = s.speech_volume ?? 80; $('speech-rate').value = s.speech_rate ?? 0;
+  $('speech-voice').value = s.speech_voice_id || '';
   for (const [id, key] of Object.entries({'setting-mode':'mode','worker-model':'worker_model','supervisor-url':'supervisor_url','supervisor-model':'supervisor_model','audit-interval':'audit_interval','max-steps':'max_steps','discord-user':'discord_user_id','discord-channel':'discord_channel_id','context-length':'context_length','cpu-threads':'cpu_threads','temperature':'temperature','vision-projector':'vision_projector','supervisor-auth':'supervisor_auth','supervisor-provider':'supervisor_provider','proxy-url':'proxy_url','proxy-login-url':'proxy_login_url','proxy-model':'proxy_model'})) $(id).value = s[key] ?? '';
   $('supervisor-key').value = ''; $('discord-token').value = ''; $('clear-key').checked = false; $('clear-discord').checked = false;
   $('supervisor-key').placeholder = s.key_saved ? 'Key saved securely — leave blank to keep' : 'Enter supervisor API key';
@@ -106,11 +138,15 @@ function populateSettings() {
   $('proxy-token').value = ''; $('clear-proxy').checked = false;
   $('proxy-token').placeholder = s.proxy_token_saved ? 'Bridge key saved securely — leave blank to keep' : 'Optional bridge access key';
   renderSupervisorMode();
+  renderCache();
 }
 async function saveSettings() {
   const result = await call('save_settings', {
     mode:$('setting-mode').value, worker_model:$('worker-model').value,
     full_access:$('full-access').checked,
+    parallel_streams:Number($('parallel-streams').value), wake_word_enabled:$('wake-word-enabled').checked,
+    announce_completed_tasks:$('announce-completed').checked, speech_voice_id:$('speech-voice').value,
+    speech_volume:Number($('speech-volume').value), speech_rate:Number($('speech-rate').value),
     context_length:Number($('context-length').value), cpu_threads:Number($('cpu-threads').value),
     temperature:Number($('temperature').value), vision_projector:$('vision-projector').value,
     supervisor_auth:$('supervisor-auth').value, supervisor_provider:$('supervisor-provider').value,
@@ -136,7 +172,7 @@ $('settings-dialog').addEventListener('close', () => {$('supervisor-key').value=
 $('settings-form').onsubmit = async e => {e.preventDefault(); try {await saveSettings(); $('settings-dialog').close(); toast('Settings saved');} catch(error){toast(error.message,true);}};
 document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => {
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b === button)));
-  ['models','supervisor','discord','tools'].forEach(name => $('settings-'+name).hidden = name !== button.dataset.tab);
+  ['models','supervisor','discord','tools','voice'].forEach(name => $('settings-'+name).hidden = name !== button.dataset.tab);
 });
 function renderSupervisorMode() {
   const proxy = $('supervisor-auth').value === 'proxy';
@@ -199,6 +235,7 @@ action('proxy-login',async()=>{await saveSettings();const result=await call('ope
 $('connect-discord').onclick = async () => {try {await saveSettings();const result=await call('connect_discord');$('discord-detail').textContent=result.message;} catch(e){toast(e.message,true);}};
 $('disconnect-discord').onclick = async () => {try {const result=await call('disconnect_discord');$('discord-detail').textContent=result.message;} catch(e){toast(e.message,true);}};
 $('composer').onsubmit = async e => {e.preventDefault(); const prompt=$('prompt').value.trim(); if (!prompt || state.running || state.submitting) return;
+  if (state.voicePhase === 'dictating') {toast('Stop dictation before sending your task.');return;}
   state.submitting=true; updateRuntime({running_session:state.running,approval:state.pending});
   try {
     if (!state.session) {const session=await call('new_conversation',null);state.sessions.unshift(session);await selectSession(session.id);}
@@ -207,7 +244,7 @@ $('composer').onsubmit = async e => {e.preventDefault(); const prompt=$('prompt'
   finally {state.submitting=false;updateRuntime({running_session:state.running,approval:state.pending});}
 };
 $('prompt').addEventListener('keydown', e => {if (e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('composer').requestSubmit();}});
-$('stop').onclick = () => call('stop').then(() => status('Stopping Glitch safely...')).catch(e => toast(e.message,true));
+$('stop').onclick = () => call('stop',state.session).then(() => status('Stopping Glitch safely...')).catch(e => toast(e.message,true));
 async function resolveApproval(answer) {try {await call('approve',state.pending.id,answer);$('approval-dialog').close();} catch(e){toast(e.message,true);}}
 $('approve').onclick = () => resolveApproval(true); $('deny').onclick = () => resolveApproval(false);
 $('approval-dialog').addEventListener('cancel', e => {e.preventDefault();resolveApproval(false);});
@@ -217,10 +254,11 @@ async function poll() {
   state.polling=true; const identifier=state.session;
   try {
     await refreshModels();
+    updateVoice(await call('voice_status'));
     if (identifier) {const result=await call('poll',identifier,state.cursor); if(identifier===state.session){result.events.forEach(event=>{addEvent(event,true);state.cursor=event.id;});updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';$('discord-detail').textContent=result.discord.message || '';}}
     if (++ticks%10===0 || !identifier) {
       const result=await call('bootstrap');state.sessions=result.sessions;updateRuntime(result.runtime);renderSessions();
-      if(result.runtime.running_session && result.runtime.running_session !== state.lastRun) {
+      if(!result.runtime.runs && result.runtime.running_session && result.runtime.running_session !== state.lastRun) {
         state.lastRun=result.runtime.running_session;
         if(state.session !== state.lastRun) await selectSession(state.lastRun);
       } else if(!state.session&&state.sessions.length) await selectSession(state.sessions[0].id);
@@ -236,3 +274,69 @@ window.addEventListener('pywebviewready', async () => {
   catch(e){toast(e.message,true);}
   setInterval(poll,600);
 });
+
+function renderCache() {
+  const per = Number($('context-length').value), slots = Number($('parallel-streams').value);
+  $('cache-allocation').textContent = `${slots} stream(s) × ${per.toLocaleString()} tokens = ${(slots*per).toLocaleString()} total cache tokens. Model weights are shared; each agent's context needs additional RAM.`;
+}
+$('parallel-streams').onchange = renderCache; $('context-length').addEventListener('input',renderCache);
+function restoreDictation() {
+  if (state.voiceBase !== undefined) $('prompt').value = state.voiceBase;
+  state.voiceGeneration = null; state.voiceBase = undefined;
+  $('dictation-preview').hidden = true;
+}
+function updateVoice(voice) {
+  const input = voice.input, output = voice.output;
+  if (input.phase === 'dictating' && input.conversation_id && !state.session && !state.voiceSelecting) {
+    state.voiceSelecting = true;
+    call('bootstrap').then(async b => {state.sessions=b.sessions;await selectSession(input.conversation_id);}).catch(e=>toast(e.message,true)).finally(()=>{state.voiceSelecting=false;});
+  }
+  state.voicePhase = input.phase;
+  const labels = {off:'Microphone off',listening:'Listening for Hey Glitch',dictating:'Dictating...',speaking:'Glitch is speaking'};
+  $('voice-state').textContent = input.error || labels[input.phase] || 'Microphone off';
+  $('microphone').textContent = input.phase === 'dictating' ? 'Stop mic' : 'Mic';
+  $('microphone').setAttribute('aria-pressed',String(input.phase === 'dictating'));
+  $('stop-speaking').hidden = output.phase !== 'speaking';
+  $('dictation-preview').hidden = input.phase !== 'dictating';
+  if (input.conversation_id === state.session && input.generation_id) {
+    if (input.phase === 'dictating' && state.voiceGeneration !== input.generation_id) {
+      state.voiceGeneration = input.generation_id; state.voiceBase = $('prompt').value;
+    }
+    if (state.voiceGeneration === input.generation_id) {
+      const prefix = state.voiceBase || '';
+      const draft = prefix + (prefix && input.final ? ' ' : '') + (input.final || '');
+      $('prompt').value = draft.slice(0,20000);
+      $('dictation-text').textContent = input.interim || (input.final ? 'Continue speaking...' : 'Listening...');
+      if (input.phase !== 'dictating') {state.voiceGeneration=null;state.voiceBase=undefined;}
+    }
+  }
+  $('prompt').disabled = !!state.running || input.phase === 'dictating';
+  const model = input.model || {};
+  $('voice-setup-status').textContent = model.message || 'Set up offline voice to use your microphone';
+  $('voice-progress').value = model.phase === 'ready' ? 100 : model.total ? Math.min(99,100*model.received/model.total) : 0;
+  $('setup-voice').disabled = ['ready','downloading'].includes(model.phase);
+  $('cancel-voice-setup').disabled = model.phase !== 'downloading';
+  const signature = JSON.stringify(output.voices || []);
+  if (state.voiceList !== signature) {
+    state.voiceList = signature; const selected = $('speech-voice').value || state.settings.speech_voice_id || '';
+    $('speech-voice').replaceChildren(new Option('Windows default voice',''));
+    (output.voices || []).forEach(v => $('speech-voice').append(new Option(v.name,v.id)));
+    $('speech-voice').value=selected;
+  }
+  if (output.error && output.error !== state.voiceError) {toast(output.error,true);state.voiceError=output.error;}
+  if (input.error && input.error !== state.inputVoiceError) {toast(input.error,true);state.inputVoiceError=input.error;}
+}
+action('microphone',async()=>{
+  if(state.voicePhase==='dictating'){await call('stop_dictation',state.voiceGeneration);return;}
+  if(!state.session){const s=await call('new_conversation',null);state.sessions.unshift(s);await selectSession(s.id);}
+  await call('start_dictation',state.session);updateVoice(await call('voice_status'));
+});
+action('cancel-dictation',async()=>{await call('cancel_dictation',state.voiceGeneration);restoreDictation();});
+action('setup-voice',()=>call('setup_voice'));action('cancel-voice-setup',()=>call('cancel_voice_setup'));
+action('mute-voice',async()=>{await call('mute_voice');restoreDictation();state.settings.wake_word_enabled=false;$('wake-word-enabled').checked=false;});
+action('test-voice',async()=>{await saveSettings();await call('test_voice');});
+action('stop-speaking',()=>call('stop_speaking'));action('settings-stop-speech',()=>call('stop_speaking'));
+action('read-reply',()=>{if(!state.session)throw new Error('No reply to read yet.');return call('read_latest_reply',state.session);});
+$('new-agent').onclick=()=>$('agent-dialog').showModal();
+$('agent-close').onclick=()=>$('agent-dialog').close();
+$('agent-form').onsubmit=async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{const r=await call('spawn_agent',state.session,$('agent-role').value.trim(),$('agent-task').value.trim());state.sessions.unshift(r.session);$('agent-dialog').close();$('agent-task').value='';toast('Agent started');await poll();}catch(error){toast(error.message,true);}finally{button.disabled=false;}};

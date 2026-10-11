@@ -19,6 +19,7 @@ class DiscordGateway:
         self._loop = None
         self._client = None
         self._active_session = None
+        self._remote_sessions = set()
         self._stop_requested = threading.Event()
 
     def status(self):
@@ -46,11 +47,23 @@ class DiscordGateway:
     def stop(self):
         self._stop_requested.set()
         with self._lock:
-            if self._active_session == self.engine.state()['running_session'] and self._active_session:
-                self.engine.stop()
+            for session in list(self._remote_sessions):
+                self._stop_session(session)
+            if not self._remote_sessions and self._active_session:
+                self._stop_session(self._active_session)
             if self._loop and self._client and self._loop.is_running():
                 asyncio.run_coroutine_threadsafe(self._client.close(), self._loop)
         self._status(False, 'Discord is disconnected')
+
+    def _is_active(self, session):
+        return self.engine.active_session(session) if hasattr(self.engine, 'active_session') else self.engine.state()['running_session'] == session
+
+    def _stop_session(self, session):
+        if self._is_active(session):
+            if hasattr(self.engine, 'active_session'):
+                self.engine.stop(session)
+            else:
+                self.engine.stop()
 
     def _run(self, settings, token):
         import discord
@@ -110,7 +123,8 @@ class DiscordGateway:
                     await message.channel.send('Glitch is working.' if state['running_session'] else 'Glitch is ready.', allowed_mentions=discord.AllowedMentions.none())
                     return
                 if content == '!stop':
-                    gateway.engine.stop()
+                    for session in list(gateway._remote_sessions):
+                        gateway._stop_session(session)
                     await message.channel.send('Stopping Glitch; pending approvals are denied.')
                     return
                 if not content.startswith('!task '):
@@ -120,7 +134,7 @@ class DiscordGateway:
                 if not sessions:
                     await message.channel.send('Choose a project folder in the Glitch desktop app first.')
                     return
-                if gateway.engine.state()['running_session']:
+                if gateway.engine.state()['running_session'] and not hasattr(gateway.engine, 'active_session'):
                     await message.channel.send('Glitch already has an active task. Use `!stop` before assigning another.')
                     return
                 session = gateway.store.new_session(sessions[0]['workspace'])
@@ -130,6 +144,7 @@ class DiscordGateway:
                     await message.channel.send(str(error), allowed_mentions=discord.AllowedMentions.none())
                     return
                 gateway._active_session = session
+                gateway._remote_sessions.add(session)
                 access = 'Full Access is on; supported actions run without approval prompts.' if gateway.store.settings().get('full_access') else 'Risky actions will wait for your approval here or in the desktop app.'
                 await message.channel.send('Glitch accepted your task. ' + access)
                 asyncio.create_task(self.stream(session, message.channel))
@@ -170,15 +185,16 @@ class DiscordGateway:
                             joined = '\n'.join(text)
                             for offset in range(0, min(len(joined), 10000), 1800):
                                 await channel.send(joined[offset:offset + 1800], allowed_mentions=discord.AllowedMentions.none())
-                        if gateway.engine.state()['running_session'] != session and not events:
+                        if not gateway._is_active(session) and not events:
                             break
                         await asyncio.sleep(1.5)
                 except (discord.HTTPException, OSError):
-                    if gateway.engine.state()['running_session'] == session:
-                        gateway.engine.stop()
+                    gateway._stop_session(session)
                     gateway._status(False, 'Discord updates failed; the remote task was stopped safely.')
                 finally:
-                    gateway._active_session = None
+                    gateway._remote_sessions.discard(session)
+                    if gateway._active_session == session:
+                        gateway._active_session = None
 
         async def listen():
             gateway._loop = asyncio.get_running_loop()

@@ -11,8 +11,9 @@ from glitch.computer import COMPUTER_SCHEMAS, ComputerTools
 
 
 class AgentEngine:
-    def __init__(self, store, models):
+    def __init__(self, store, models, coordinator=None, run_id=None, parent_id=None):
         self.store, self.models = store, models
+        self.coordinator, self.run_id, self.parent_id = coordinator, run_id, parent_id
         self.lock = threading.RLock()
         self.cancelled = threading.Event()
         self.running_session = None
@@ -84,7 +85,10 @@ class AgentEngine:
             return allowed
 
     def _emit(self, kind, title, payload=None):
-        return self.store.event(self.running_session, kind, title, payload)
+        identifier = self.store.event(self.running_session, kind, title, payload)
+        if self.coordinator:
+            self.coordinator.event(self.run_id, kind, title, payload or {}, identifier)
+        return identifier
 
     @staticmethod
     def validate(decision):
@@ -101,8 +105,17 @@ class AgentEngine:
         try:
             settings = self.store.settings()
             workspace = self.store.session(session)['workspace']
-            tools = WorkspaceTools(workspace, self._approve, self._emit, self.cancelled)
-            computer = ComputerTools(self.store.directory, self._approve, self._emit, self.cancelled)
+            def approve(action, payload):
+                allowed = self._approve(action, payload)
+                if allowed and self.coordinator:
+                    self.coordinator.resources.acquire(action, workspace, self.cancelled)
+                return allowed
+            tools = WorkspaceTools(workspace, approve, self._emit, self.cancelled)
+            computer = ComputerTools(self.store.directory, approve, self._emit, self.cancelled)
+            extra = []
+            if self.coordinator and not self.parent_id:
+                from glitch.orchestration import DELEGATION_SCHEMAS
+                extra = DELEGATION_SCHEMAS
             self.store.message(session, 'user', prompt)
             monitor = TriggerMonitor(settings['audit_interval'])
             base = ('You are Glitch, a careful local project assistant. Use actual tool evidence, never invent file contents or tool results. '
@@ -111,7 +124,9 @@ class AgentEngine:
                     'Return JSON with message (short update or final answer), done (boolean), tool (null when done, otherwise {name,args}). '
                     'Do not claim completion until you have verified the requested change. '
                     'Desktop screenshots use primary-screen native pixels; use a vision-capable model for visual tasks. '
-                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS))
+                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + extra))
+            if self.coordinator:
+                base += '\nAssigned role: ' + json.dumps(self.coordinator.runs[self.run_id]['role'])
             def system():
                 return {'role': 'system', 'content': base + '\nPersistent course corrections:\n' + '\n'.join(self.store.anchors(session))}
             messages = [system()] + [m | {'role': 'user'} if m['role'] == 'context' else m for m in self.store.messages(session)]
@@ -144,12 +159,18 @@ class AgentEngine:
                 self._emit('tool', tool['name'], {'args': tool['args'], 'step': step})
                 began = time.monotonic()
                 try:
-                    executor = computer if tool['name'] in {t['name'] for t in COMPUTER_SCHEMAS} else tools
-                    result = executor.execute(tool['name'], tool['args'])
+                    if tool['name'] in {t['name'] for t in extra}:
+                        result = self.coordinator.delegate(self.run_id, tool['name'], tool['args'], self.cancelled)
+                    else:
+                        executor = computer if tool['name'] in {t['name'] for t in COMPUTER_SCHEMAS} else tools
+                        result = executor.execute(tool['name'], tool['args'])
                 except InterruptedError:
                     raise
                 except Exception as error:
                     result = {'ok': False, 'error': str(error)}
+                finally:
+                    if self.coordinator:
+                        self.coordinator.resources.release()
                 image = result.pop('_image', None)
                 action = {'tool': tool['name'], 'args': tool['args'], 'ok': result.get('ok') is True, 'result': result}
                 actions.append(action)
