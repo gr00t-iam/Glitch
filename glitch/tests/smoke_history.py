@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-def run(output):
+def run(output, race=False):
     import webview
     from glitch.api import DesktopAPI
     from glitch.desktop_runtime import install_webview_cleanup_guard
@@ -48,6 +48,12 @@ def run(output):
         def probe():
             try:
                 wait('state.initialized && state.session!==null')
+                if race:
+                    wait('!state.polling && !state.initializing')
+                    window.evaluate_js((Path(__file__).with_name('history_selection_fixture.js')).read_text(encoding='utf-8'))
+                    wait('window.historyRaceDone===true')
+                    result.update(window.evaluate_js('window.historyRaceResult'))
+                    return
                 wait("document.querySelectorAll('#projects .history-row').length===1")
                 window.evaluate_js("window.confirm=()=>false;document.getElementById('clear-chat').click()")
                 time.sleep(.2)
@@ -97,4 +103,6 @@ def run(output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('output')
-    run(parser.parse_args().output)
+    parser.add_argument('--race', action='store_true')
+    args = parser.parse_args()
+    run(args.output, race=args.race)

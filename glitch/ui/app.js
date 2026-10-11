@@ -59,7 +59,7 @@ function renderSessions() {
     const open=document.createElement('button');open.className='session';open.textContent=workspaceName(project.workspace);open.title=project.workspace;
     const members=state.sessions.filter(s=>s.project_id===project.id);
     open.onclick=()=>{if(members.length)selectSession(members[0].id).catch(e=>toast(e.message,true));};
-    open.disabled=!members.length;
+    open.disabled=state.historyBusy || !members.length;
     const remove=document.createElement('button');remove.textContent='\u00d7';remove.className='history-remove';remove.title='Remove project registration';remove.setAttribute('aria-label','Remove project registration');
     remove.onclick=()=>removeHistory('project',project.id);row.append(open,remove);$('projects').append(row);
     const group=document.createElement('section');group.className='history-group';
@@ -67,6 +67,7 @@ function renderSessions() {
     members.forEach(session => {
     const row=document.createElement('div');row.className='history-row';
     const node = document.createElement('button'); node.className = 'session' + (state.session === session.id ? ' active' : '');
+    node.disabled=state.historyBusy;
     const title = document.createElement('strong'); title.textContent = session.title;
     const path = document.createElement('small'); path.textContent = workspaceName(session.workspace); node.append(title, path);
     node.title = session.workspace; node.onclick = () => selectSession(session.id).catch(e => toast(e.message, true));
@@ -91,39 +92,61 @@ function emptyHistory() {
 async function removeHistory(kind, identifier) {
   if(state.historyBusy || !confirm(kind==='project'?'Remove this project registration and all its Glitch conversations? Project files and vault credentials will not be deleted.':'Permanently delete this Glitch conversation and its history? Project files and vault credentials will not be deleted.'))return;
   state.historyBusy=true;
+  const generation=state.viewGeneration=(state.viewGeneration || 0)+1;
+  renderSessions();
   try {
     const result=kind==='project'?await call('remove_project',identifier):await call('delete_session',identifier);
-    const b=await call('bootstrap');state.sessions=b.sessions;state.projects=b.projects;state.runtime=b.runtime;
+    const b=await call('bootstrap');
+    if(generation!==state.viewGeneration)return;
+    state.sessions=b.sessions;state.projects=b.projects;state.runtime=b.runtime;
     if(!state.sessions.some(s=>s.id===state.session)) {
-      if(result.session)await selectSession(result.session.id);else emptyHistory();
+      if(result.session)await selectSession(result.session.id,generation);else emptyHistory();
     } else renderSessions();
     updateRuntime(b.runtime);
-  } catch(e){toast(e.message,true);}finally{state.historyBusy=false;}
+  } catch(e){toast(e.message,true);}finally{state.historyBusy=false;renderSessions();}
 }
-async function selectSession(identifier) {
+async function selectSession(identifier, lifecycleGeneration=null) {
+  if(state.historyBusy && lifecycleGeneration!==state.viewGeneration)return;
+  if(!state.sessions.some(session=>session.id===identifier))return;
   const generation=state.viewGeneration=(state.viewGeneration || 0)+1;
+  const current=()=>generation===state.viewGeneration && (!state.historyBusy || lifecycleGeneration!==null) && state.sessions.some(session=>session.id===identifier);
   if (state.voiceGeneration) restoreDictation();
   state.drafts ??= {};
   if (state.session) state.drafts[state.session] = $('prompt').value;
-  await call('voice_select_session', identifier);
-  if(generation!==state.viewGeneration)return;
-  state.session = identifier; state.cursor = 0; state.count = 0;
-  $('prompt').value = state.drafts[identifier] || '';
-  const result = await call('load_conversation', identifier);
-  if (state.session !== identifier || generation!==state.viewGeneration) return;
-  state.chatEventWatermark=result.chat_event_watermark || 0;
-  $('messages').replaceChildren(); $('events').replaceChildren(); $('event-count').textContent = '0';
-  result.messages.forEach(m => addMessage(m.role, m.content));
-  result.events.forEach(e => {addEvent(e); state.cursor = e.id;});
-  // Drain archived timeline pages without replaying assistant messages into the loaded conversation.
-  while (result.events.length === 300) {
-    const page = await call('poll', identifier, state.cursor);
-    if (state.session !== identifier || generation!==state.viewGeneration) return;
-    result.events = page.events; page.events.forEach(e => {addEvent(e); state.cursor = e.id;});
+  try {
+    await call('voice_select_session', identifier);
+    if(!current())return;
+    const result = await call('load_conversation', identifier);
+    if(!current())return;
+    // Load all pages before committing selection; failures retain the previous view.
+    const events=[...result.events];
+    let page=result.events;
+    while(page.length===300) {
+      const next=await call('poll',identifier,page.at(-1).id);
+      if(!current())return;
+      page=next.events;events.push(...page);
+    }
+    state.session = identifier; state.cursor = 0; state.count = 0;
+    $('prompt').value = state.drafts[identifier] || '';
+    state.chatEventWatermark=result.chat_event_watermark || 0;
+    $('messages').replaceChildren(); $('events').replaceChildren(); $('event-count').textContent = '0';
+    result.messages.forEach(m => addMessage(m.role, m.content));
+    events.forEach(e => {addEvent(e); state.cursor = e.id;});
+    renderSessions();
+    if(!result.messages.length){const empty=document.createElement('p');empty.className='empty';empty.textContent='No visible messages';$('messages').append(empty);}
+    if(!state.count){const empty=document.createElement('p');empty.className='empty';empty.textContent='No visible events';$('events').append(empty);}
+  } catch(error) {
+    if(generation!==state.viewGeneration)return;
+    if(!state.sessions.some(session=>session.id===state.session))emptyHistory();
+    throw error;
   }
-  renderSessions();
-  if(!result.messages.length){const empty=document.createElement('p');empty.className='empty';empty.textContent='No visible messages';$('messages').append(empty);}
-  if(!state.count){const empty=document.createElement('p');empty.className='empty';empty.textContent='No visible events';$('events').append(empty);}
+}
+async function refreshHistory(generation=state.viewGeneration) {
+  const result=await call('bootstrap');
+  if(generation!==state.viewGeneration || state.historyBusy)return null;
+  if(!result.initialized)return result;
+  state.sessions=result.sessions || [];state.projects=result.projects || [];
+  return result;
 }
 function updateRuntime(runtime) {
   state.runtime = runtime;
@@ -146,7 +169,7 @@ function updateRuntime(runtime) {
     if (!row) {
       row = document.createElement('div'); row.className = 'agent-run';row.dataset.run=run.id;
       const heading=document.createElement('strong'),detail=document.createElement('small');
-      const open=document.createElement('button');open.textContent='Open';open.onclick=async()=>{try{const b=await call('bootstrap');state.sessions=b.sessions;await selectSession(run.session);}catch(e){toast(e.message,true);}};
+      const open=document.createElement('button');open.textContent='Open';open.onclick=async()=>{try{if(state.historyBusy)return;const b=await refreshHistory();if(b)await selectSession(run.session);}catch(e){toast(e.message,true);}};
       const stop=document.createElement('button');stop.textContent='Stop';stop.onclick=()=>call('stop',run.id).catch(e=>toast(e.message,true));
       const dismiss=document.createElement('button');dismiss.textContent='\u00d7';dismiss.title='Dismiss finished agent card';dismiss.setAttribute('aria-label','Dismiss finished agent card');dismiss.onclick=()=>call('dismiss_run',run.id).then(()=>poll()).catch(e=>toast(e.message,true));
       row.append(heading,detail,open,stop,dismiss);$('agent-deck').append(row);
@@ -336,7 +359,9 @@ function action(id, handler) {$(id).onclick=async()=>{const button=$(id);button.
 for(const [id,kind] of [['clear-chat','chat'],['clear-timeline','timeline']])action(id,async()=>{
   if(!state.session || state.historyBusy || !confirm(kind==='chat'?'Clear the chat window? Archived model history and pending approvals remain.':'Clear the timeline? Archived evidence and pending approvals remain.'))return;
   state.historyBusy=true;
-  try{await call('clear_view',state.session,kind);await selectSession(state.session);}finally{state.historyBusy=false;}
+  const generation=state.viewGeneration=(state.viewGeneration || 0)+1;
+  const session=state.session;renderSessions();
+  try{await call('clear_view',session,kind);if(generation===state.viewGeneration)await selectSession(session,generation);}finally{state.historyBusy=false;renderSessions();}
 });
 action('discover',()=>refreshModels(true));
 action('download-model',async()=>{await call('download_model',$('download-url').value.trim(),$('download-sha').value.trim());await refreshModels();});
@@ -380,13 +405,16 @@ function initializationGate() {
 async function initialize() {
   if(state.initializing)return;
   state.initializing=true;state.initialized=false;initializationGate();
+  const generation=state.viewGeneration;
   try {
     const result=await call('bootstrap');
+    if(generation!==state.viewGeneration || state.historyBusy)return;
     if(!result.initialized) {
       state.recoveryRequired=!!result.recovery_required;state.vault=result.vault||[];renderVault();
       initializationGate();status(result.message || 'Saved credentials require recovery');return;
     }
     updateSettings(result.settings);await refreshModels(true);updateVoice(result.voice);populateSettings();
+    if(generation!==state.viewGeneration || state.historyBusy)return;
     state.sessions=result.sessions;state.projects=result.projects || [];
     if(state.sessions.length)await selectSession(state.sessions.some(s=>s.id===state.session)?state.session:state.sessions[0].id);else emptyHistory();
     state.runtime=result.runtime;state.recoveryRequired=false;state.initialized=true;
@@ -403,7 +431,9 @@ async function poll() {
     updateVoice(await call('voice_status'));
     if (identifier) {const result=await call('poll',identifier,state.cursor); if(identifier===state.session && generation===state.viewGeneration && !state.historyBusy){result.events.forEach(event=>{addEvent(event,true);state.cursor=event.id;});updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';$('discord-detail').textContent=result.discord.message || '';}}
     if (++ticks%10===0 || !identifier) {
-      const result=await call('bootstrap');if(!result.initialized){state.initialized=false;state.recoveryRequired=!!result.recovery_required;initializationGate();return;}state.sessions=result.sessions;state.projects=result.projects || [];updateSettings(result.settings);updateRuntime(result.runtime);renderSessions();
+      if(generation!==state.viewGeneration || state.historyBusy)return;
+      const result=await refreshHistory(generation);if(!result)return;
+      if(!result.initialized){state.initialized=false;state.recoveryRequired=!!result.recovery_required;initializationGate();return;}updateSettings(result.settings);updateRuntime(result.runtime);renderSessions();
       if(!result.runtime.runs && result.runtime.running_session && result.runtime.running_session !== state.lastRun) {
         state.lastRun=result.runtime.running_session;
         if(state.session !== state.lastRun) await selectSession(state.lastRun);
@@ -433,9 +463,9 @@ function restoreDictation() {
 }
 function updateVoice(voice) {
   const input = voice.input, output = voice.output;
-  if (input.phase === 'dictating' && input.conversation_id && !state.session && !state.voiceSelecting) {
+  if (input.phase === 'dictating' && input.conversation_id && !state.session && !state.voiceSelecting && !state.historyBusy) {
     state.voiceSelecting = true;
-    call('bootstrap').then(async b => {state.sessions=b.sessions;await selectSession(input.conversation_id);}).catch(e=>toast(e.message,true)).finally(()=>{state.voiceSelecting=false;});
+    refreshHistory().then(async b => {if(b)await selectSession(input.conversation_id);}).catch(e=>toast(e.message,true)).finally(()=>{state.voiceSelecting=false;});
   }
   state.voicePhase = input.phase;
   const labels = {off:'Microphone off',listening:'Listening for Hey Glitch',dictating:'Dictating...',speaking:'Glitch is speaking'};
