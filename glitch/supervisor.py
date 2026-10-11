@@ -1,6 +1,7 @@
 """Explicit API billing or a user-configured, authorized loopback account bridge."""
 
 import json
+import threading
 from urllib.parse import urlsplit
 
 import requests
@@ -47,26 +48,51 @@ class SupervisorBridge:
             raise RuntimeError(f'Supervisor returned HTTP {response.status_code}. Check connection, credentials and model access.')
 
     def test(self, settings):
-        endpoint, provider, _, headers = self._configuration(settings, require_model=False)
-        with requests.get(endpoint + '/models', headers=headers, timeout=(5, 15), allow_redirects=False) as response:
-            self._check(response)
-            models = [item['id'] for item in response.json().get('data', []) if isinstance(item.get('id'), str)]
-        return self.store.redact({'ok': True, 'models': models, 'message': 'Connected. Model listing verified; generation and plan limits depend on the provider.'})
+        endpoint, provider, model, headers = self._configuration(settings)
+        result = {'ok': False, 'catalog_ok': False, 'generation_ok': False, 'models': [], 'model': model}
+        try:
+            with requests.get(endpoint + '/models', headers=headers, timeout=(5, 15), allow_redirects=False) as response:
+                self._check(response)
+                result['models'] = [item['id'] for item in response.json().get('data', [])
+                                    if isinstance(item, dict) and isinstance(item.get('id'), str)]
+                result['catalog_ok'] = True
+        except (requests.RequestException, RuntimeError, ValueError, TypeError):
+            pass  # Catalog access and generation permission are independent checks.
+        try:
+            self._generate(settings, 'Return exactly GLITCH_CONNECTION_OK.',
+                                   'Synthetic connection probe. Do not use tools.', threading.Event())
+            result.update(ok=True, generation_ok=True,
+                          message=f'Selected model {model}: real generation verified. Model catalog ' +
+                          ('verified.' if result['catalog_ok'] else 'unavailable.') + ' Future usage and plan limits still apply.')
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError, IndexError) as error:
+            result['message'] = f'Selected model {model}: generation failed. Model catalog ' + (
+                'verified; listing alone is not a connection proof. ' if result['catalog_ok'] else 'unavailable. ') + str(error)
+        return self.store.redact(result)
 
     def review(self, settings, task, actions, reason, cancel):
         if cancel.is_set():
             raise InterruptedError('Stopped.')
-        endpoint, provider, model, headers = self._configuration(settings)
         from glitch.redaction import fields, action
         audit = json.dumps(self.store.redact({'task': task, 'reason': reason, 'recent_actions': actions[-15:]},
                                            fields('task', 'reason', recent_actions=[action])))[:24000]
-        body = {'model': model, 'max_tokens': 600, 'temperature': 0.1,
-                'messages': [{'role': 'user', 'content': audit}]}
+        return self._generate(settings, AUDITOR, audit, cancel)
+
+    def _generate(self, settings, system, content, cancel):
+        if cancel.is_set():
+            raise InterruptedError('Stopped.')
+        endpoint, provider, model, headers = self._configuration(settings)
+        body = {'model': model, 'max_tokens': 600,
+                'messages': [{'role': 'user', 'content': content}]}
+        # Authorized bridges choose their own sampler; OpenAI reasoning models
+        # also reject non-default temperature. Never retry with another identity.
+        if settings['supervisor_auth'] != 'proxy' and not (
+                provider == 'openai' and model.lower().startswith(('o1', 'o3', 'o4', 'gpt-5', 'gpt-6'))):
+            body['temperature'] = 0.1
         if provider == 'anthropic':
-            body['system'] = AUDITOR
+            body['system'] = system
             route = '/messages'
         else:
-            body['messages'].insert(0, {'role': 'system', 'content': AUDITOR})
+            body['messages'].insert(0, {'role': 'system', 'content': system})
             route = '/chat/completions'
         with requests.post(endpoint + route, headers=headers, json=body, timeout=(5, 60), allow_redirects=False) as response:
             self._check(response)

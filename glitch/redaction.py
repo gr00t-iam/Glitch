@@ -95,7 +95,7 @@ DESCRIPTOR = fields('name', 'origin', 'saved', id=OPAQUE, created_at=OPAQUE, upd
                     tls=fields('verify', 'custom_ca'))
 RUN_STATUS = enum('running', 'waiting', 'needs_approval', 'interrupted', 'completed', 'stopped', 'paused')
 RESULT = fields('ok', 'error', 'denied', 'content', 'value', 'output', 'diff', 'path', 'url',
-                'truncated', 'bytes', 'exit_code', 'timed_out', 'duration_ms', 'width', 'height',
+                'truncated', 'bytes', 'exit_code', 'timed_out', 'duration_ms', 'width', 'height', 'absolute_path', 'sha256',
                 capture=OPAQUE, run_id=OPAQUE, session=OPAQUE, status=RUN_STATUS,
                 result=None, entries=[fields('name', 'size', type=enum('file', 'directory'))],
                 tabs=[fields('title', 'url', id=OPAQUE)])
@@ -212,7 +212,7 @@ BRIDGE = {
     'dismiss_run': OK,
     'save_settings': settings, 'discover_models': MODELS, 'model_status': MODEL_STATUS,
     'download_model': TRANSFER, 'import_model': TRANSFER, 'load_model': OK,
-    'test_supervisor': fields('ok', 'message', models=[None]), 'open_proxy_login': OK,
+    'test_supervisor': fields('ok', 'message', 'catalog_ok', 'generation_ok', 'model', models=[None]), 'open_proxy_login': OK,
     'send': fields('ok', 'prompt'), 'spawn_agent': fields(run_id=OPAQUE, session=SESSION),
     'poll': fields(events=[event], runtime=RUNTIME, discord=DISCORD, voice=VOICE),
     'voice_status': VOICE, 'start_dictation': fields(generation_id=OPAQUE),

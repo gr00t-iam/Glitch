@@ -48,13 +48,15 @@ In **Supervision**, choose **Hybrid**, then **Developer API** or **Subscription 
 
 ### Developer API
 
-Choose OpenRouter, OpenAI, Anthropic or another compatible API. The UI supplies the base URL; configure a model available to your account and its API key. OpenAI-compatible providers use `/chat/completions` with Bearer authentication. Anthropic uses native `/messages`, `x-api-key` and the API version header. **Test connection** lists accessible models; it does not prove generation permission, available credits or unlimited access. Developer API billing is separate from consumer subscriptions.
+Choose OpenRouter, OpenAI, Anthropic or another compatible API. The UI supplies the base URL; configure a model available to your account and its API key. OpenAI-compatible providers use `/chat/completions` with Bearer authentication. Anthropic uses native `/messages`, `x-api-key` and the API version header. **Test connection** checks the catalog separately from a small real generation using your selected model. A catalog success with generation failure is not reported connected. The probe may consume usage; success does not promise future credits or unlimited access. Developer API billing is separate from consumer subscriptions.
 
 ### Authorized account bridge
 
 Configure a provider-authorized bridge on your PC exposing `GET /v1/models` and `POST /v1/chat/completions`. Enter its loopback API URL, model, optional bridge access key and local sign-in page. **Open bridge sign-in** launches that page in your normal browser. Complete the provider's authorized flow there, then **Test connection** in Glitch.
 
 The bridge owns OAuth, refresh tokens, plan entitlement and usage limits. Glitch stores only the optional bridge access key using Windows DPAPI. Only `127.0.0.1`, `::1` or `localhost` URLs are accepted, without embedded credentials, query strings or redirects. Keep that port private. The bridge must be configured separately; it is not bundled and Glitch does not provide a universal subscription proxy.
+
+Bridge requests omit optional temperature; native OpenAI reasoning model requests also omit it. A failed request never silently switches models or authentication.
 
 Glitch does not collect account passwords, cookies or consumer OAuth tokens, and does not impersonate official OAuth clients. ChatGPT subscription routing requires a supported, authorized integration: see [OpenAI sign-in documentation](https://developers.openai.com/siwc). A Plus plan alone does not make the general API free. [Anthropic's authentication rules](https://code.claude.com/docs/en/legal-and-compliance) prohibit third-party apps offering Claude.ai login or routing through Pro/Max credentials. Use an Anthropic developer API key instead. Unmodified native provider applications are a different integration and are not bundled here.
 
@@ -63,6 +65,8 @@ Glitch does not collect account passwords, cookies or consumer OAuth tokens, and
 The supervisor is consulted after every five tool steps (configurable), a tool failure, invalid worker decision or three repeated identical actions. A bounded audit contains the task and up to 15 recent redacted action records, including file/output snippets. Full conversation history and screenshots are excluded. Redaction cannot recognize every custom secret; keep confidential projects in worker-only mode.
 
 Course Correction Directives persist in SQLite and are injected into the local system instruction before every later step and future turn of that conversation. Conversation history and verified evidence survive restarts. Cloud failures pause visibly instead of skipping the audit. Six identical repeated actions stop the loop. Supervisor advice never approves an action or elevates privileges.
+
+For recognized file-creation/edit requests and every successful workspace write, `done=true` is not completion evidence. Glitch requires a successful write in that turn and current disk readback matching the intended UTF-8 bytes, records the resolved selected-workspace path and SHA-256, and attaches proof to the final answer. Missing or changed files withhold the final message and completion event, returning concrete feedback (and a hybrid audit) within the existing step budget, with at most three unsupported-completion attempts. Denied actions remain denied; the host does not write on the model's behalf. Ordinary chat and explanations do not require tools. Intent detection is conservative English text matching, not a semantic guarantee for every wording or every kind of artifact; shell success, listings and old files alone are not workspace-write proof.
 
 ## Discord control
 

@@ -6,6 +6,7 @@ import time
 import uuid
 
 from glitch.monitor import TriggerMonitor
+from glitch.artifacts import ArtifactEvidence
 from glitch.tools import TOOL_SCHEMAS, WorkspaceTools
 from glitch.computer import COMPUTER_SCHEMAS, ComputerTools
 from glitch.service_tools import SERVICE_SCHEMAS, ServiceTools
@@ -107,6 +108,8 @@ class AgentEngine:
 
     def _run(self, session, prompt):
         actions = []
+        artifacts = ArtifactEvidence(prompt)
+        unsupported = 0
         try:
             settings = self.store.settings()
             workspace = self.store.session(session)['workspace']
@@ -150,6 +153,8 @@ class AgentEngine:
                 self._emit('local', 'Glitch is processing locally...', {'step': step})
                 messages[0] = system()
                 decision = self.store.redact(self.models.chat(settings, self.store.redact(messages, [MESSAGE]), self.cancelled), DECISION)
+                if self.cancelled.is_set():
+                    raise InterruptedError('Stopped by you.')
                 try:
                     self.validate(decision)
                 except ValueError as error:
@@ -161,6 +166,29 @@ class AgentEngine:
                     if len(actions) >= 3 and all(a['tool'] == 'worker_decision' for a in actions[-3:]):
                         raise RuntimeError('The model repeatedly returned invalid decisions. Choose a more capable model.')
                     continue
+                if decision['done']:
+                    try:
+                        proofs = artifacts.verify(tools, decision['message'])
+                    except (ValueError, OSError) as error:
+                        unsupported += 1
+                        reason = 'Unsupported completion error: ' + str(error)
+                        self._emit('error', reason)
+                        actions.append({'tool': 'worker_decision', 'args': {}, 'ok': False, 'error': reason})
+                        feedback = {'role': 'user', 'content': reason}
+                        messages.append(feedback)
+                        self.store.message(session, 'context', reason)
+                        if settings['mode'] == 'hybrid':
+                            self._audit(settings, prompt, actions, reason)
+                        if unsupported >= 3:
+                            self._emit('paused', 'Unverified artifacts; completion withheld after three attempts.')
+                            return
+                        continue
+                    for proof in proofs:
+                        self._emit('tool', 'read_file', {'args': {'path': proof['path']}, 'step': step})
+                        self._emit('result', 'read_file', {'result': proof, 'step': step})
+                    if proofs:
+                        decision['message'] += '\nVerified artifacts:\n' + '\n'.join(
+                            f"{p['absolute_path']} (SHA-256 {p['sha256']}, {p['bytes']} bytes)" for p in proofs)
                 messages.append({'role': 'assistant', 'content': ProtocolText((decision, DECISION))})
                 if decision['message']:
                     self.store.message(session, 'assistant', decision['message'])
@@ -191,6 +219,7 @@ class AgentEngine:
                 finally:
                     resources.release()
                 image = result.pop('_image', None)
+                artifacts.record(tool['name'], tool['args'], result)
                 result = self.store.redact(result, RESULT)
                 action = {'tool': tool['name'], 'args': tool['args'], 'ok': result.get('ok') is True, 'result': result}
                 actions.append(action)

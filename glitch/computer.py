@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -49,6 +50,13 @@ class ChromeController:
             except (psutil.AccessDenied, psutil.NoSuchProcess):
                 continue
         if not owned:
+            # A non-HTTP listener is still foreign; an HTTP probe cannot establish
+            # that a port is free. Do not launch Chrome over somebody else's port.
+            with socket.socket() as probe:
+                try:
+                    probe.bind(('127.0.0.1', urlsplit(self.base).port))
+                except OSError:
+                    raise ValueError('Port 9222 is occupied by an unrelated service.') from None
             candidates = [Path(os.environ.get(name, '')) / suffix for name, suffix in [
                 ('PROGRAMFILES', 'Google/Chrome/Application/chrome.exe'),
                 ('PROGRAMFILES(X86)', 'Google/Chrome/Application/chrome.exe'),

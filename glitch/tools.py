@@ -1,6 +1,7 @@
 """Workspace-scoped tools with approval before every mutation or command."""
 
 import difflib
+import hashlib
 import os
 import queue
 import shutil
@@ -115,6 +116,19 @@ class WorkspaceTools:
             if temporary:
                 temporary.unlink(missing_ok=True)
         return {'ok': True, 'path': args['path'], 'bytes': len(args['content'].encode()), 'diff': diff[:60000]}
+
+    def readback(self, target, expected_hash):
+        """Host verification, not a model-supplied success flag or pathname."""
+        if self.cancel.is_set():
+            raise InterruptedError('Stopped.')
+        path = self.resolve(target)
+        with path.open('rb') as source:
+            data = source.read(1_000_001)
+        digest = hashlib.sha256(data).hexdigest()
+        if len(data) > 1_000_000 or digest != expected_hash:
+            raise ValueError('Artifact readback differs from the successful write: ' + target)
+        return {'ok': True, 'path': target, 'absolute_path': str(path), 'bytes': len(data),
+                'sha256': digest, 'content': data[:120000].decode('utf-8'), 'truncated': len(data) > 120000}
 
     def command(self, recipe):
         if recipe not in RECIPES:
