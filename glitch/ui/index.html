@@ -30,7 +30,7 @@
 </div>
 <dialog id="settings-dialog">
   <div class="dialog-header"><div><h2>Settings &amp; connections</h2><p class="muted">Give Glitch the right tools for your project.</p></div><button id="settings-close" aria-label="Close settings">×</button></div>
-  <div class="settings-tabs" role="tablist"><button id="tab-models" role="tab" aria-selected="true" data-tab="models">Model Manager</button><button id="tab-supervisor" role="tab" aria-selected="false" data-tab="supervisor">Supervision</button><button id="tab-discord" role="tab" aria-selected="false" data-tab="discord">Discord control</button><button id="tab-tools" role="tab" aria-selected="false" data-tab="tools">Computer &amp; safety</button><button id="tab-voice" role="tab" aria-selected="false" data-tab="voice">Voice</button></div>
+  <div class="settings-tabs" role="tablist"><button id="tab-models" role="tab" aria-selected="true" data-tab="models">Model Manager</button><button id="tab-supervisor" role="tab" aria-selected="false" data-tab="supervisor">Supervision</button><button id="tab-discord" role="tab" aria-selected="false" data-tab="discord">Discord control</button><button id="tab-tools" role="tab" aria-selected="false" data-tab="tools">Computer &amp; safety</button><button id="tab-voice" role="tab" aria-selected="false" data-tab="voice">Voice</button><button id="tab-vault" role="tab" aria-selected="false" data-tab="vault">Vault</button></div>
   <form id="settings-form">
     <section id="settings-models" role="tabpanel" aria-labelledby="tab-models">
       <h3>A brain of your own</h3><p class="muted">Glitch runs GGUF models directly on your NVIDIA GPU or CPU. No separate model server is needed.</p>
@@ -84,6 +84,22 @@
       <label class="checkbox"><input id="wake-word-enabled" type="checkbox">Listen for Hey Glitch</label><p class="notice">Hands-free mode keeps your default microphone open while Glitch is running. Wake detection stays local. Saying Hey Glitch starts dictation, not task execution. Silence finishes your draft; Send stays under your control. Mute turns listening off.</p>
       <label class="checkbox"><input id="announce-completed" type="checkbox">Speak when a task finishes</label><p class="muted">Short completion reports only, not terminal logs or every sub-agent action. Listening pauses while Glitch speaks.</p>
       <label>Windows voice<select id="speech-voice"><option value="">Windows default voice</option></select></label><div class="field-grid"><label>Volume<input id="speech-volume" type="range" min="0" max="100" value="80"></label><label>Speaking rate<input id="speech-rate" type="range" min="-10" max="10" value="0"></label></div><div class="connection-actions"><button id="test-voice" type="button">Test voice</button><button id="settings-stop-speech" type="button">Stop speaking</button></div>
+    </section>
+    <section id="settings-vault" role="tabpanel" aria-labelledby="tab-vault" hidden>
+      <h3>Protected credentials</h3>
+      <div id="vault-list" aria-label="Saved credentials"></div>
+      <p id="vault-lock" class="notice" hidden>Stop all active tasks before changing vault credentials.</p>
+      <fieldset id="vault-fields">
+        <legend id="vault-heading">Add credential</legend>
+        <div class="field-grid"><label>Name<input id="vault-name" maxlength="120" autocomplete="off"></label><label>Type<select id="vault-kind"><option value="bearer">Service bearer token</option><option value="basic">Service username &amp; password</option><option value="proxmox">Proxmox API token</option><option value="github">GitHub token</option><option value="browser">Browser username &amp; password</option></select></label></div>
+        <label>Allowed HTTPS origin<input id="vault-origin" type="url" maxlength="2048" placeholder="https://server.example:8006" autocomplete="off"></label>
+        <label id="vault-username-row" hidden><span id="vault-username-label">Username</span><input id="vault-username" type="password" maxlength="16384" autocomplete="new-password" spellcheck="false"></label>
+        <label><span id="vault-secret-label">Token</span><input id="vault-secret" type="password" maxlength="16384" autocomplete="new-password" spellcheck="false"></label>
+        <label>TLS trust<select id="vault-trust"><option value="system">System certificate trust</option><option value="custom">Custom trusted CA</option></select></label>
+        <label id="vault-ca-row" hidden>Trusted CA certificate (PEM)<textarea id="vault-ca" rows="3" maxlength="65536" autocomplete="off" spellcheck="false"></textarea></label>
+        <div class="connection-actions"><button id="vault-save" class="primary" type="button">Add credential</button><button id="vault-cancel" type="button" hidden>Cancel update</button></div>
+      </fieldset>
+      <p id="vault-result" class="muted" role="status" aria-live="polite"></p>
     </section>
     <div class="dialog-footer"><span id="save-result" class="muted" aria-live="polite"></span><button class="primary" type="submit">Save settings</button></div>
   </form>

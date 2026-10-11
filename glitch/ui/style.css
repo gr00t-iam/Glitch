@@ -18,6 +18,15 @@
 /* Lucide 0.468.0 icons, bundled locally under the ISC license. */
 .ui-icon{display:inline-block;width:18px;height:18px;flex:0 0 18px;background:currentColor;mask-position:center;mask-size:contain;mask-repeat:no-repeat}
 .icon-mic{mask-image:url('icons/mic.svg')}.icon-shield{mask-image:url('icons/shield-alert.svg')}.icon-send{mask-image:url('icons/arrow-up.svg')}
+#vault-fields{border:0;padding:0;margin:18px 0 0;min-width:0}
+#vault-fields legend{font-weight:600;padding:0;margin-bottom:10px}
+.vault-entry{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;padding:12px 0;border-bottom:1px solid var(--border);align-items:center}
+.vault-entry strong,.vault-entry small{grid-column:1/-1;overflow-wrap:anywhere;min-width:0}
+.vault-entry small{color:var(--muted)}
+.vault-entry .pill{justify-self:start;font-size:11px}
+#vault-result{min-height:22px;overflow-wrap:anywhere}
+#vault-fields input,#vault-fields textarea,#vault-fields select{max-width:100%;min-width:0}
+.settings-tabs{flex-wrap:wrap}
 #composer{background:#24282c;border-radius:20px;padding:14px 14px 10px}
 #prompt{min-height:48px;font-size:14px}
 .composer-footer{align-items:center;gap:8px}

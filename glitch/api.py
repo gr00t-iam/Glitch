@@ -1,8 +1,32 @@
 """Narrow native bridge exposed only to the bundled application page."""
 
 import threading
+from functools import wraps
 
 
+def _redacted_bridge(cls):
+    """Cover every public native result/exception, including future bridge methods."""
+    def guard(method):
+        @wraps(method)
+        def invoke(self, *args, **kwargs):
+            try:
+                result = method(self, *args, **kwargs)
+                return result if method.__name__ in ('screenshot', 'vault_list') else self._store.redact(result)
+            except Exception as error:
+                try:
+                    message = self._store.redact(str(error))
+                except Exception:
+                    message = 'Credential protection failed. Repair or remove unreadable saved credentials.'
+                raise ValueError(message) from None
+        return invoke
+    for name, method in list(vars(cls).items()):
+        # Image bytes are not text. Metadata-only listing remains available for recovery.
+        if not name.startswith('_') and callable(method):
+            setattr(cls, name, guard(method))
+    return cls
+
+
+@_redacted_bridge
 class DesktopAPI:
     def __init__(self, store, engine, models):
         self._store, self._engine, self._models = store, engine, models
@@ -16,7 +40,32 @@ class DesktopAPI:
     def bootstrap(self):
         return {'settings': self._store.settings(), 'sessions': self._store.sessions(),
                 'runtime': self._engine.state(), 'discord': self._discord.status() if self._discord else {},
-                'startup_warnings': list(self._store.startup_warnings), 'voice': self.voice_status()}
+                'startup_warnings': list(self._store.startup_warnings), 'voice': self.voice_status(),
+                'vault': self.vault_list()}
+
+    def vault_list(self):
+        return self._store.vault.list()
+
+    def vault_save(self, name, kind, origin, payload, identifier=None):
+        # Use the same lock as run admission, including Discord/delegated starts.
+        with self._engine.lock:
+            self._vault_idle()
+            return self._store.vault.save(name, kind, origin, payload, identifier)
+
+    def vault_delete(self, identifier):
+        with self._engine.lock:
+            self._vault_idle()
+            self._store.vault.delete(identifier)
+            return {'ok': True}
+
+    def _vault_idle(self):
+        if hasattr(self._engine, 'is_idle'):
+            busy = not self._engine.is_idle()
+        else:
+            state = self._engine.state()
+            busy = state['running_session'] or state.get('active_sessions') or state.get('approval') or state.get('approvals')
+        if busy:
+            raise ValueError('Stop all active tasks before changing vault credentials.')
 
     def choose_workspace(self):
         import webview
@@ -115,7 +164,7 @@ class DesktopAPI:
 
     def send(self, session, prompt):
         self._engine.start(session, prompt)
-        return {'ok': True}
+        return {'ok': True, 'prompt': self._store.redact(prompt)}
 
     def spawn_agent(self, session, role, task):
         if not hasattr(self._engine, 'active_session'):

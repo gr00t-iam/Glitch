@@ -81,6 +81,7 @@ async function selectSession(identifier) {
 }
 function updateRuntime(runtime) {
   state.runtime = runtime;
+  updateVaultGate();
   state.running = runtime.active_sessions ? (runtime.active_sessions.includes(state.session) ? state.session : null) : runtime.running_session;
   const busy = !!state.running || state.submitting;
   const full = runtime.active_sessions && runtime.active_sessions.length >= runtime.capacity;
@@ -169,14 +170,67 @@ async function choose() {
 }
 $('choose').onclick = () => choose().catch(e => toast(e.message, true)); $('project').onclick = $('choose').onclick;
 $('new').onclick = async () => {try {const session = await call('new_conversation', state.session); state.sessions.unshift(session); await selectSession(session.id); status('Glitch is ready');} catch(e){toast(e.message,true);}};
-$('settings-open').onclick = () => {populateSettings(); $('settings-dialog').showModal();};
+$('settings-open').onclick = () => {populateSettings(); $('settings-dialog').showModal(); refreshVault().catch(e=>toast(e.message,true));};
 $('settings-close').onclick = () => {$('settings-dialog').close(); $('supervisor-key').value=''; $('discord-token').value='';};
-$('settings-dialog').addEventListener('close', () => {$('supervisor-key').value=''; $('discord-token').value=''; $('proxy-token').value='';});
+$('settings-dialog').addEventListener('close', () => {$('supervisor-key').value=''; $('discord-token').value=''; $('proxy-token').value='';clearVaultFields();});
 $('settings-form').onsubmit = async e => {e.preventDefault(); try {await saveSettings(); $('settings-dialog').close(); toast('Settings saved');} catch(error){toast(error.message,true);}};
 document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => {
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b === button)));
-  ['models','supervisor','discord','tools','voice'].forEach(name => $('settings-'+name).hidden = name !== button.dataset.tab);
+  ['models','supervisor','discord','tools','voice','vault'].forEach(name => $('settings-'+name).hidden = name !== button.dataset.tab);
+  if (button.dataset.tab === 'vault') refreshVault().catch(e=>toast(e.message,true));
 });
+function clearVaultFields() {
+  for (const id of ['vault-secret','vault-username','vault-ca']) $(id).value='';
+}
+function vaultKindChanged() {
+  clearVaultFields();
+  const kind=$('vault-kind').value, paired=['basic','browser','proxmox'].includes(kind);
+  $('vault-username-row').hidden=!paired;
+  $('vault-username-label').textContent=kind==='proxmox'?'Token identifier':'Username';
+  $('vault-secret-label').textContent=['basic','browser'].includes(kind)?'Password':kind==='proxmox'?'Token secret':'Token';
+}
+function resetVaultEditor() {
+  state.vaultEditing=null; clearVaultFields();
+  $('vault-name').value='';$('vault-origin').value='';$('vault-kind').value='bearer';$('vault-trust').value='system';
+  $('vault-ca-row').hidden=true;$('vault-heading').textContent='Add credential';$('vault-save').textContent='Add credential';$('vault-cancel').hidden=true;
+  vaultKindChanged();updateVaultGate();
+}
+function updateVaultGate() {
+  const runtime=state.runtime||{},locked=!!runtime.running_session||!!runtime.active_sessions?.length||!!state.submitting;
+  $('vault-lock').hidden=!locked;
+  $('vault-fields').disabled=locked||!!state.vaultBusy;
+  document.querySelectorAll('[data-vault-edit],[data-vault-delete]').forEach(button=>button.disabled=locked||!!state.vaultBusy);
+}
+function renderVault() {
+  $('vault-list').replaceChildren();
+  if (!state.vault?.length) {const empty=document.createElement('p');empty.className='muted';empty.textContent='No saved credentials';$('vault-list').append(empty);}
+  for (const item of state.vault||[]) {
+    const row=document.createElement('div');row.className='vault-entry';
+    const name=document.createElement('strong');name.textContent=item.name;
+    const detail=document.createElement('small');detail.textContent=`${item.kind} · ${item.origin}`;
+    const saved=document.createElement('span');saved.className='pill';saved.textContent='Saved · masked';saved.title=item.tls.custom_ca?'Custom trusted CA; TLS verification on':'System certificate trust; TLS verification on';
+    const edit=document.createElement('button');edit.type='button';edit.textContent='Update';edit.dataset.vaultEdit=item.id;
+    edit.onclick=()=>{resetVaultEditor();state.vaultEditing=item.id;$('vault-name').value=item.name;$('vault-kind').value=item.kind;vaultKindChanged();$('vault-origin').value=item.origin;$('vault-trust').value=item.tls.custom_ca?'custom':'system';$('vault-ca-row').hidden=!item.tls.custom_ca;$('vault-heading').textContent='Update credential';$('vault-save').textContent='Update credential';$('vault-cancel').hidden=false;$('vault-result').textContent='Enter replacement values';$('vault-secret').focus();};
+    const remove=document.createElement('button');remove.type='button';remove.textContent='Delete';remove.dataset.vaultDelete=item.id;
+    remove.onclick=async()=>{if(!confirm(`Delete credential "${item.name}"?`))return;state.vaultBusy=true;updateVaultGate();try{await call('vault_delete',item.id);if(state.vaultEditing===item.id)resetVaultEditor();await refreshVault();$('vault-result').textContent='Credential deleted';}catch(e){$('vault-result').textContent=e.message;}finally{state.vaultBusy=false;updateVaultGate();}};
+    row.append(name,detail,saved,edit,remove);$('vault-list').append(row);
+  }
+  updateVaultGate();
+}
+async function refreshVault() {state.vault=await call('vault_list');renderVault();}
+$('vault-kind').onchange=vaultKindChanged;
+$('vault-trust').onchange=()=>{$('vault-ca-row').hidden=$('vault-trust').value!=='custom';$('vault-ca').value='';};
+$('vault-cancel').onclick=()=>{resetVaultEditor();$('vault-result').textContent='';};
+$('vault-save').onclick=async()=>{
+  const kind=$('vault-kind').value,identifier=state.vaultEditing||null;
+  if(!$('vault-secret').value||(['basic','browser','proxmox'].includes(kind)&&!$('vault-username').value)||($('vault-trust').value==='custom'&&!$('vault-ca').value)) {$('vault-result').textContent=identifier?'Enter all replacement values':'Enter the required credential values';return;}
+  const payload=kind==='proxmox'?{token_id:$('vault-username').value,secret:$('vault-secret').value}:['basic','browser'].includes(kind)?{username:$('vault-username').value,password:$('vault-secret').value}:{token:$('vault-secret').value};
+  if($('vault-trust').value==='custom')payload.ca_pem=$('vault-ca').value;
+  state.vaultBusy=true;updateVaultGate();
+  try {await call('vault_save',$('vault-name').value.trim(),kind,$('vault-origin').value.trim(),payload,identifier);resetVaultEditor();await refreshVault();$('vault-result').textContent=identifier?'Updated securely':'Saved securely';}
+  catch(e){$('vault-result').textContent=e.message;}
+  finally{clearVaultFields();state.vaultBusy=false;updateVaultGate();}
+};
 function renderSupervisorMode() {
   const proxy = $('supervisor-auth').value === 'proxy';
   $('api-fields').hidden = proxy; $('proxy-fields').hidden = !proxy;
@@ -246,7 +300,7 @@ $('composer').onsubmit = async e => {e.preventDefault(); const prompt=$('prompt'
   state.submitting=true; updateRuntime({running_session:state.running,approval:state.pending});
   try {
     if (!state.session) {const session=await call('new_conversation',null);state.sessions.unshift(session);await selectSession(session.id);}
-    await call('send',state.session,prompt);addMessage('user',prompt);$('prompt').value='';state.running=state.session;
+    const result=await call('send',state.session,prompt);addMessage('user',result.prompt);$('prompt').value='';state.running=state.session;
   } catch(error){toast(error.message,true);}
   finally {state.submitting=false;updateRuntime({running_session:state.running,approval:state.pending});}
 };

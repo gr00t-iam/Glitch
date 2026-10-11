@@ -14,9 +14,10 @@ def spoken_report(text):
 
 
 class SpeechOutputService:
-    def __init__(self, audio, settings, secrets=None):
+    def __init__(self, audio, settings, secrets=None, redactor=None):
         self.audio, self.settings = audio, settings
         self.secrets = secrets or (lambda: [])
+        self.redactor = redactor or redact
         self.lock = threading.Lock()
         self.commands = queue.Queue(maxsize=8)
         self.closed = threading.Event()
@@ -37,7 +38,7 @@ class SpeechOutputService:
         for secret in self.secrets():
             if secret:
                 text = str(text).replace(secret, '[credential removed]')
-        text = spoken_report(text)
+        text = spoken_report(getattr(self, 'redactor', redact)(str(text)))
         if text:
             try:
                 self.commands.put_nowait((text, automatic))

@@ -85,6 +85,7 @@ class AgentEngine:
             return allowed
 
     def _emit(self, kind, title, payload=None):
+        title, payload = self.store.redact(title), self.store.redact(payload)
         identifier = self.store.event(self.running_session, kind, title, payload)
         if self.coordinator:
             self.coordinator.event(self.run_id, kind, title, payload or {}, identifier)
@@ -128,7 +129,8 @@ class AgentEngine:
             if self.coordinator:
                 base += '\nAssigned role: ' + json.dumps(self.coordinator.runs[self.run_id]['role'])
             def system():
-                return {'role': 'system', 'content': base + '\nPersistent course corrections:\n' + '\n'.join(self.store.anchors(session))}
+                descriptors = json.dumps(self.store.vault.list())
+                return {'role': 'system', 'content': base + '\nRegistered credential descriptors (IDs and metadata only; secret retrieval is not a tool):\n' + descriptors + '\nPersistent course corrections:\n' + '\n'.join(self.store.anchors(session))}
             messages = [system()] + [m | {'role': 'user'} if m['role'] == 'context' else m for m in self.store.messages(session)]
             self._emit('started', 'Glitch is processing locally...', {'model': settings['worker_model'], 'workspace': workspace})
             for step in range(1, settings['max_steps'] + 1):
@@ -136,7 +138,7 @@ class AgentEngine:
                     raise InterruptedError('Stopped by you.')
                 self._emit('local', 'Glitch is processing locally...', {'step': step})
                 messages[0] = system()
-                decision = self.models.chat(settings, messages, self.cancelled)
+                decision = self.store.redact(self.models.chat(settings, self.store.redact(messages), self.cancelled))
                 try:
                     self.validate(decision)
                 except ValueError as error:
@@ -172,6 +174,7 @@ class AgentEngine:
                     if self.coordinator:
                         self.coordinator.resources.release()
                 image = result.pop('_image', None)
+                result = self.store.redact(result)
                 action = {'tool': tool['name'], 'args': tool['args'], 'ok': result.get('ok') is True, 'result': result}
                 actions.append(action)
                 self._emit('result' if action['ok'] else 'error', tool['name'],
@@ -202,7 +205,8 @@ class AgentEngine:
 
     def _audit(self, settings, prompt, actions, trigger):
         self._emit('supervisor', 'Glitch is consulting the cloud supervisor to refresh memory', {'reason': trigger})
-        directive = self.models.review(settings, prompt, actions, trigger, self.cancelled)
+        directive = self.store.redact(self.models.review(settings, self.store.redact(prompt),
+                                                       self.store.redact(actions), self.store.redact(trigger), self.cancelled))
         self.store.anchor(self.running_session, directive)
         corrected = 'error' in trigger.lower() or 'loop' in trigger.lower() or 'invalid' in trigger.lower()
         self._emit('correction' if corrected else 'anchor',

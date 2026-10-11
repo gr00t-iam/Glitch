@@ -5,8 +5,6 @@ from urllib.parse import urlsplit
 
 import requests
 
-from glitch.storage import redact
-
 AUDITOR = ('You are Glitch, an auditor of a local worker. Inspect actual tool evidence for errors, loops '
            'and unsupported claims. Return a concise Course Correction Directive with verified next steps. '
            'Do not grant approvals, repeat credentials or bypass safety. If no drift exists, give a brief continuation anchor.')
@@ -53,13 +51,13 @@ class SupervisorBridge:
         with requests.get(endpoint + '/models', headers=headers, timeout=(5, 15), allow_redirects=False) as response:
             self._check(response)
             models = [item['id'] for item in response.json().get('data', []) if isinstance(item.get('id'), str)]
-        return {'ok': True, 'models': models, 'message': 'Connected. Model listing verified; generation and plan limits depend on the provider.'}
+        return self.store.redact({'ok': True, 'models': models, 'message': 'Connected. Model listing verified; generation and plan limits depend on the provider.'})
 
     def review(self, settings, task, actions, reason, cancel):
         if cancel.is_set():
             raise InterruptedError('Stopped.')
         endpoint, provider, model, headers = self._configuration(settings)
-        audit = redact(json.dumps({'task': task, 'reason': reason, 'recent_actions': actions[-15:]}))[:24000]
+        audit = json.dumps(self.store.redact({'task': task, 'reason': reason, 'recent_actions': actions[-15:]}))[:24000]
         body = {'model': model, 'max_tokens': 600, 'temperature': 0.1,
                 'messages': [{'role': 'user', 'content': audit}]}
         if provider == 'anthropic':
@@ -79,4 +77,4 @@ class SupervisorBridge:
             raise InterruptedError('Stopped.')
         if not isinstance(directive, str) or not directive.strip():
             raise RuntimeError('Supervisor returned no correction directive.')
-        return redact(directive.strip()[:6000])
+        return self.store.redact(directive.strip())[:6000]

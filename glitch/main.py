@@ -62,7 +62,7 @@ def main():
         return api._voice_session
     api._audio = AudioCoordinator(store.directory, voice_conversation)
     api._speech = SpeechOutputService(api._audio, store.settings,
-                                     lambda: [store.supervisor_key(), store.discord_token(), store.proxy_token()])
+                                     redactor=store.redact)
     unsubscribe = engine.subscribe_completion(api._speech.on_completed)
     if store.settings()['wake_word_enabled'] and api._audio.models.model_path():
         api._audio.set_wake_enabled(True)

@@ -104,6 +104,7 @@ class Store:
         self.path = self.directory / 'glitch.sqlite3'
         self.lock = threading.RLock()
         self.startup_warnings = []
+        self._vault = None
         with self.connect() as db:
             db.executescript('''
                 PRAGMA journal_mode=WAL;
@@ -119,9 +120,25 @@ class Store:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP);
                 CREATE INDEX IF NOT EXISTS message_session ON messages(session,id);
                 CREATE INDEX IF NOT EXISTS event_session ON events(session,id);
+                CREATE TABLE IF NOT EXISTS vault(id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                    kind TEXT NOT NULL, origin TEXT NOT NULL, ciphertext BLOB NOT NULL,
+                    custom_ca INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+                    updated_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')));
             ''')
             db.execute('''UPDATE settings SET value='""' WHERE key='vision_projector'
                 AND value!='""' AND value=(SELECT value FROM settings WHERE key='worker_model')''')
+
+    @property
+    def vault(self):
+        with self.lock:
+            if self._vault is None:
+                from glitch.vault import Vault
+                self._vault = Vault(self)
+            return self._vault
+
+    def redact(self, value):
+        return self.vault.redact(value)
 
     @contextmanager
     def connect(self):
@@ -257,7 +274,7 @@ class Store:
 
     def sessions(self):
         with self.lock, self.connect() as db:
-            return [dict(r) for r in db.execute('SELECT * FROM sessions ORDER BY created_at DESC,rowid DESC')]
+            return self.redact([dict(r) for r in db.execute('SELECT * FROM sessions ORDER BY created_at DESC,rowid DESC')])
 
     def session(self, session):
         with self.lock, self.connect() as db:
@@ -267,7 +284,7 @@ class Store:
         return dict(row)
 
     def message(self, session, role, content):
-        content = redact(content)
+        content = self.redact(content)
         with self.lock, self.connect() as db:
             db.execute('INSERT INTO messages(session,role,content) VALUES (?,?,?)', (session, role, content))
             if role == 'user':
@@ -275,23 +292,23 @@ class Store:
 
     def messages(self, session):
         with self.lock, self.connect() as db:
-            return [dict(r) for r in db.execute('SELECT role,content FROM messages WHERE session=? ORDER BY id', (session,))]
+            return self.redact([dict(r) for r in db.execute('SELECT role,content FROM messages WHERE session=? ORDER BY id', (session,))])
 
     def anchor(self, session, directive):
         with self.lock, self.connect() as db:
-            db.execute('INSERT INTO anchors(session,directive) VALUES (?,?)', (session, redact(directive)))
+            db.execute('INSERT INTO anchors(session,directive) VALUES (?,?)', (session, self.redact(directive)))
 
     def anchors(self, session):
         with self.lock, self.connect() as db:
-            return [r[0] for r in db.execute('SELECT directive FROM anchors WHERE session=? ORDER BY id', (session,))]
+            return self.redact([r[0] for r in db.execute('SELECT directive FROM anchors WHERE session=? ORDER BY id', (session,))])
 
     def event(self, session, kind, title, payload=None):
         with self.lock, self.connect() as db:
             cursor = db.execute('INSERT INTO events(session,kind,title,payload) VALUES (?,?,?,?)',
-                                (session, kind, redact(title), json.dumps(safe_data(payload or {}), ensure_ascii=True)))
+                                (session, self.redact(kind), self.redact(title), json.dumps(safe_data(self.redact(payload or {})), ensure_ascii=True)))
             return cursor.lastrowid
 
     def events(self, session, after):
         with self.lock, self.connect() as db:
-            return [dict(r) | {'payload': json.loads(r['payload'])} for r in db.execute(
-                'SELECT * FROM events WHERE session=? AND id>? ORDER BY id LIMIT 300', (session, int(after)))]
+            return self.redact([dict(r) | {'payload': json.loads(r['payload'])} for r in db.execute(
+                'SELECT * FROM events WHERE session=? AND id>? ORDER BY id LIMIT 300', (session, int(after)))])

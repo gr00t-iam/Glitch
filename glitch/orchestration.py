@@ -33,6 +33,15 @@ class AgentCoordinator:
         with self.lock:
             return any(r['session'] == session and r['engine'].state()['running_session'] for r in self.runs.values())
 
+    def is_idle(self):
+        """Host admission check must not depend on decrypting output descriptors."""
+        with self.lock:
+            for run in self.runs.values():
+                state = run['engine'].state()
+                if state['running_session'] or state['approval']:
+                    return False
+            return True
+
     def start(self, session, prompt, parent_id=None, role='Assistant'):
         self.store.session(session)
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 20000:
@@ -47,6 +56,7 @@ class AgentCoordinator:
             active = sum(bool(r['engine'].state()['running_session']) for r in self.runs.values())
             if active >= self.store.settings().get('parallel_streams', 1):
                 raise ValueError('All agent streams are occupied. Wait or stop an agent first.')
+            prompt, role = self.store.redact(prompt), self.store.redact(role)
             identifier = uuid.uuid4().hex
             engine = AgentEngine(self.store, self.models, coordinator=self, run_id=identifier, parent_id=parent_id)
             run = {'id': identifier, 'session': session, 'parent_id': parent_id, 'role': role, 'task': prompt,
@@ -62,10 +72,10 @@ class AgentCoordinator:
         with self.lock:
             active = [r for r in self.runs.values() if r['engine'].state()['running_session']]
             approvals = [r['engine'].state()['approval'] for r in active if r['engine'].state()['approval']]
-            return {'running_session': active[0]['session'] if active else None, 'approval': approvals[0] if approvals else None,
+            return self.store.redact({'running_session': active[0]['session'] if active else None, 'approval': approvals[0] if approvals else None,
                     'approvals': approvals, 'stopping': any(r['engine'].state()['stopping'] for r in active),
                     'runs': (self.history + [{k: v for k, v in r.items() if k != 'engine'} for r in list(self.runs.values())])[-40:],
-                    'active_sessions': [r['session'] for r in active], 'capacity': self.store.settings().get('parallel_streams', 1)}
+                    'active_sessions': [r['session'] for r in active], 'capacity': self.store.settings().get('parallel_streams', 1)})
 
     def stop(self, run_id=None):
         with self.lock:
@@ -92,6 +102,7 @@ class AgentCoordinator:
         return unsubscribe
 
     def event(self, run_id, kind, title, payload, event_id):
+        title, payload = self.store.redact(title), self.store.redact(payload)
         # Engines emit while holding their own approval lock. Never take the
         # admission lock here: state() takes admission -> engine locks.
         with self.event_lock:

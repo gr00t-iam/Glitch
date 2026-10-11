@@ -62,7 +62,7 @@ class ModelClient:
             path = self.library.path(settings['worker_model'])
             projector = self.library.path(settings['vision_projector']) if settings['vision_projector'] else None
             self.worker.load(path, settings, cancel, projector)
-        return self.worker.chat(messages, DECISION_SCHEMA, cancel)
+        return self.store.redact(self.worker.chat(self.store.redact(messages), DECISION_SCHEMA, cancel))
 
     def review(self, settings, task, actions, reason, cancel):
         return self.supervisor.review(settings, task, actions, reason, cancel)
