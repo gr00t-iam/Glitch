@@ -115,7 +115,7 @@ py -3.12 -m venv .venv-glitch
 .\.venv-glitch\Scripts\python.exe -m PyInstaller --noconfirm --clean glitch\Glitch.spec
 ```
 
-Launch `dist\Glitch.exe`. The checked-in spec bundles Python, CPU native DLLs, NumPy, PyWebView, Discord, computer tools and offline UI assets into one windowed file. The lock uses the official llama-cpp-python CPU wheel index and requires a binary wheel, so a C++ compiler is unnecessary. Build Windows binaries on Windows. GitHub Actions runs tests and builds an artifact.
+Launch `dist\Glitch.exe`. The checked-in spec bundles Python, the pinned CPU llama.cpp runtime, NumPy, PyWebView, Discord, computer tools and offline UI assets into one windowed file. Runtime preparation downloads and verifies the prebuilt archive, so a C++ compiler is unnecessary. The old llama-cpp-python adapter is source-only, not shipped alongside the new runtime. Build Windows binaries on Windows. GitHub Actions runs tests and builds an artifact.
 
 For source development, run `.\.venv-glitch\Scripts\python.exe -m glitch.main`. The optional **Start Glitch.cmd** only launches a compiled executable; it does not start npm or a development server. Unsigned builds may trigger SmartScreen. Signing requires your organization's own code-signing certificate.
 
@@ -128,7 +128,7 @@ dist\Glitch.exe --parallel-test glitch-test-output\parallel glitch-test-output\m
 dist\Glitch.exe --voice-test glitch-test-output\voice
 ```
 
-Each writes `result.json` to its output directory. The legacy inference test checks the retained single-worker adapter. The parallel test verifies the shipped shared runtime with four real occupied slots, one PID, individual cancellation and slot reuse. Its tiny fixture receives a test-only training-context metadata override, never applied to production models. The native UI test uses deterministic worker decisions for settings, approvals, live voice draft handling, navigation protection and lifecycle checks. Voice tests use synthetic local WAVs, never microphone capture or speaker playback. Tiny model and synthetic fixture success do not establish long-horizon model quality, 30B RAM capacity, noisy-room recognition or audible output. Paid/API/subscription and Discord checks with live accounts require your credentials.
+Each writes `result.json` to its output directory. Single-stream and parallel inference tests exercise the shipped runtime, including four real occupied slots, one PID, individual cancellation and slot reuse. The pinned tiny fixture receives a test-only training-context metadata override, never applied to production models. The native UI test uses deterministic worker decisions for settings, approvals, live voice draft handling, navigation protection and lifecycle checks. Voice tests use synthetic local WAVs, never microphone capture or speaker playback. Tiny model and synthetic fixture success do not establish long-horizon model quality, 30B RAM capacity, noisy-room recognition or audible output. Paid/API/subscription and Discord checks with live accounts require your credentials.
 
 ## Source structure
 

@@ -15,3 +15,5 @@ Approved: shared-model agents, offline dictation, Hey Glitch activation and spok
 - Shipping controls: Agents + starts named independent tasks; Stream capacity/cache allocation is visible in Model Manager; Voice settings contain setup, wake, announcements and voice/volume/rate. Start Glitch.cmd selects the new versioned executable without replacing the old running file.
 
 Outstanding hardware evidence: actual human microphone/wake phrase in a noisy room and audible speaker playback are not exercised automatically. No microphone or speaker was activated without user consent.
+
+Packaging correction: the obsolete frozen llama-cpp-python smoke failed although its source check and the shipped shared runtime passed. Remove the unused adapter's native libraries from the executable rather than ship two incompatible inference stacks. Both single-stream and parallel gates now exercise the shipped runtime; legacy adapter source remains for historical tests only.
