@@ -39,6 +39,8 @@ class DesktopAPI:
             raise ValueError('Stop the active task before changing configuration.')
         before = self._store.settings()
         result = self._store.save_settings(update)
+        if any(result[key] != before[key] for key in ('worker_model', 'context_length', 'cpu_threads', 'temperature', 'vision_projector')):
+            self._models.unload()
         if self._discord and (update.get('discord_token') or update.get('clear_discord_token') or
                               any(result[k] != before[k] for k in ('discord_user_id', 'discord_channel_id'))):
             self._discord.stop()
@@ -46,6 +48,53 @@ class DesktopAPI:
 
     def discover_models(self):
         return self._models.discover(self._store.settings())
+
+    def model_status(self):
+        return self._models.status()
+
+    def download_model(self, url, sha256=''):
+        return self._models.library.download(url, sha256)
+
+    def cancel_model_transfer(self):
+        self._models.library.cancel()
+        return {'ok': True}
+
+    def _idle(self):
+        if self._engine.state()['running_session']:
+            raise ValueError('Stop the active task before changing the loaded model.')
+
+    def import_model(self):
+        import webview
+        with self._picker_lock:
+            selected = self._window.create_file_dialog(webview.FileDialog.OPEN, file_types=('GGUF models (*.gguf)',))
+        return self._models.library.import_file(selected[0]) if selected else None
+
+    def load_model(self):
+        self._idle()
+        return self._models.load(self._store.settings())
+
+    def unload_model(self):
+        self._idle()
+        self._models.unload()
+        return {'ok': True}
+
+    def delete_model(self, name):
+        self._idle()
+        if self._models.worker.status()['name'] == name:
+            raise ValueError('Unload the model before deleting it.')
+        if self._store.settings()['vision_projector'] == name and self._models.worker.status()['name']:
+            raise ValueError('Unload the model before deleting its projector.')
+        self._models.library.delete(name)
+        return {'ok': True}
+
+    def test_supervisor(self):
+        return self._models.supervisor.test(self._store.settings())
+
+    def open_proxy_login(self):
+        import webbrowser
+        from glitch.supervisor import loopback_url
+        url = loopback_url(self._store.settings()['proxy_login_url'])
+        return {'ok': bool(webbrowser.open(url)), 'message': 'Complete sign-in in your authorized bridge, then test the connection here.'}
 
     def send(self, session, prompt):
         self._engine.start(session, prompt)

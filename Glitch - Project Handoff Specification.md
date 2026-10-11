@@ -2,7 +2,7 @@
 
 ## Product intent
 
-Glitch is a local-first Windows desktop agent with a robotic owl companion. It helps a single user work on trusted local projects and perform approved computer tasks through a chat interface. A local Ollama model is the worker; an optional cloud model audits its progress. The product must be usable by double-clicking a packaged executable, without npm or terminal setup.
+Glitch is a local-first Windows desktop agent with a robotic owl companion. It helps a single user work on trusted local projects and perform approved computer tasks through a chat interface. An embedded llama.cpp GGUF model is the worker; an optional cloud model audits its progress. The product is usable by double-clicking a packaged executable, without npm, Python, an external model server or terminal setup.
 
 The supported application is **`glitch/`**, not the retained React/Vite or Electron prototypes. Consumer documentation must describe implemented desktop behavior, not prototype features or planned capabilities.
 
@@ -14,7 +14,10 @@ The supported application is **`glitch/`**, not the retained React/Vite or Elect
 | `desktop_runtime.py` | Guarded, idempotent cleanup for disposed WebView2 controls. |
 | `api.py` | Narrow UI-to-Python bridge; no raw filesystem or shell exposure. |
 | `engine.py` | Background worker loop, bounded steps, cancellation, approvals, verified evidence and anchors. |
-| `models.py` | Ollama and OpenAI-compatible cloud HTTP clients. |
+| `models.py` | Embedded-worker facade and model lifecycle coordination. |
+| `local_inference.py` | Persistent isolated CPU inference process; cancellation and native crash recovery. |
+| `model_manager.py` | Async public Hugging Face downloads/imports, integrity checks, atomic publication and local catalog. |
+| `supervisor.py` | OpenAI-compatible/native Anthropic APIs and authorized loopback bridge. |
 | `monitor.py` | Audits after configured steps, errors or repeated actions. |
 | `storage.py` | SQLite conversations, events and corrections; Windows DPAPI credentials; safe environment import. |
 | `tools.py` | Workspace-bounded file actions and fixed command recipes. |
@@ -36,12 +39,15 @@ Data belongs under `%LOCALAPPDATA%\Glitch`, never the temporary executable extra
 - Do not present supervision, redaction, or recipe allowlists as an OS sandbox.
 - Local-only means no cloud audits; it does not imply that configured remote endpoints or web tasks are offline.
 - Keep the desktop bridge available only to the bundled trusted page.
+- Never spoof consumer OAuth clients or collect account passwords, cookies or subscription session tokens. The local bridge owns authorized sign-in and provider entitlement.
+- Model files are data, not guaranteed safe inputs. Process isolation protects UI stability, not the operating system. Download only trusted publishers.
+- No silent history truncation: a context overflow pauses with an error. Choose a larger window or a new task.
 
 ## Release verification
 
-Run the Python regression suite, build with `glitch/Glitch.spec`, then test the frozen UI and an ordinary startup/shutdown. Test with the real inherited environment, including Ollama wildcard bind settings. Exercise the disposed-WebView close case to catch framework lifecycle exceptions.
+Run the Python regression suite, build with `glitch/Glitch.spec`, then test the frozen UI and an ordinary startup/shutdown. Run `Glitch.exe --inference-test <output-directory> <real-gguf-path>` to verify the bundled native DLLs, structured generation, process spawn and unload. Exercise the disposed-WebView close case to catch framework lifecycle exceptions.
 
-Desktop smoke tests use a local HTTP model fixture and actual WebView2. Simulated Discord tests do not establish live account integration. Label fixture-based, real transport and live credential verification separately.
+Desktop smoke tests use deterministic worker decisions and actual WebView2. Native inference smoke tests use real downloaded weights, not a server fixture. Simulated Discord and local HTTP supervisor tests do not establish live account integration. Label fixture-based, real native inference and live credential verification separately.
 
 Build on Windows with Python 3.12. End users need neither Python nor Node.js. Unsigned builds may trigger SmartScreen; sign release binaries when a signing identity is available.
 

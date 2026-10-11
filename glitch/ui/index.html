@@ -29,14 +29,37 @@
 </div>
 <dialog id="settings-dialog">
   <div class="dialog-header"><div><h2>Settings &amp; connections</h2><p class="muted">Give Glitch the right tools for your project.</p></div><button id="settings-close" aria-label="Close settings">×</button></div>
-  <div class="settings-tabs" role="tablist"><button id="tab-models" role="tab" aria-selected="true" data-tab="models">Models &amp; supervision</button><button id="tab-discord" role="tab" aria-selected="false" data-tab="discord">Discord control</button><button id="tab-tools" role="tab" aria-selected="false" data-tab="tools">Computer &amp; safety</button></div>
+  <div class="settings-tabs" role="tablist"><button id="tab-models" role="tab" aria-selected="true" data-tab="models">Model Manager</button><button id="tab-supervisor" role="tab" aria-selected="false" data-tab="supervisor">Supervision</button><button id="tab-discord" role="tab" aria-selected="false" data-tab="discord">Discord control</button><button id="tab-tools" role="tab" aria-selected="false" data-tab="tools">Computer &amp; safety</button></div>
   <form id="settings-form">
     <section id="settings-models" role="tabpanel" aria-labelledby="tab-models">
-      <div class="field-grid"><label>Execution mode<select id="setting-mode"><option value="local">Worker only — no cloud supervisor</option><option value="hybrid">Hybrid — local worker with cloud audits</option></select></label><label>Ollama endpoint<input id="ollama-url" type="url" required></label></div>
-      <div class="model-field"><label>Local model<input id="worker-model" list="model-options" placeholder="Select a downloaded model"><datalist id="model-options"></datalist></label><button id="discover" type="button">Find local models</button></div><p id="discover-result" class="muted" aria-live="polite">Ollama must be running. For screenshots, choose a model with vision support.</p>
-      <hr><h3>Cloud supervisor</h3><p class="muted">Hybrid mode sends your task and up to 15 recent, redacted tool actions to the configured cloud service. Screenshots stay out of cloud audits.</p>
-      <div class="field-grid"><label>API endpoint<input id="supervisor-url" type="url" required></label><label>Supervisor model<input id="supervisor-model" required></label></div>
-      <label>Supervisor API key<input id="supervisor-key" type="password" autocomplete="off" placeholder="Leave blank to keep the saved key"></label><label class="checkbox"><input id="clear-key" type="checkbox">Remove saved supervisor key</label>
+      <h3>A brain of your own</h3><p class="muted">Glitch runs GGUF models directly on your CPU. No separate model server is needed. Choose an instruction-tuned model that fits in your available RAM.</p>
+      <label>Hugging Face GGUF file URL<input id="download-url" type="url" placeholder="https://huggingface.co/owner/repo/resolve/main/model.gguf"></label>
+      <label>Expected SHA256 (optional)<input id="download-sha" placeholder="64-character checksum from a trusted publisher" maxlength="64"></label>
+      <div class="connection-actions"><button id="download-model" type="button" class="primary">Download model</button><button id="import-model" type="button">Import GGUF file</button><button id="cancel-transfer" type="button" disabled>Cancel transfer</button></div>
+      <div class="transfer"><progress id="model-progress" max="100" value="0" aria-label="Model download progress"></progress><p id="transfer-status" class="muted" aria-live="polite">Ready to download</p></div>
+      <hr><div class="model-field"><label>Local model<select id="worker-model"><option value="">No models downloaded</option></select></label><button id="discover" type="button">Refresh library</button></div>
+      <div class="connection-actions"><button id="load-model" type="button" class="primary">Load model</button><button id="unload-model" type="button">Unload</button><button id="delete-model" type="button">Delete selected</button></div><p id="inference-status" class="muted" aria-live="polite">No model loaded</p>
+      <div class="field-grid"><label>Context window (tokens)<input id="context-length" type="number" min="1024" max="32768"></label><label>CPU threads<input id="cpu-threads" type="number" min="1" max="128"></label><label>Temperature<input id="temperature" type="number" min="0" max="2" step="0.05"></label><label>LLaVA 1.5 projector (optional)<select id="vision-projector"><option value="">Text / browser DOM only</option></select></label></div>
+      <p class="muted">A larger context uses more memory. Screenshot understanding requires a compatible LLaVA 1.5 model and its projector GGUF; text models use browser DOM tools instead.</p>
+    </section>
+    <section id="settings-supervisor" role="tabpanel" aria-labelledby="tab-supervisor" hidden>
+      <label>Execution mode<select id="setting-mode"><option value="local">Worker only — stays local</option><option value="hybrid">Hybrid — local worker with cloud audits</option></select></label>
+      <h3>A second pair of eyes</h3><p class="muted">Hybrid mode sends your task and up to 15 recent, redacted actions to the supervisor on errors, repeated actions, or step milestones. Screenshots stay out of cloud audits. Approval gates remain on.</p>
+      <label>Supervisor connection<select id="supervisor-auth"><option value="api">Developer API — usage billed by provider</option><option value="proxy">Subscription account — authorized local bridge</option></select></label>
+      <div id="api-fields">
+        <label>Provider<select id="supervisor-provider"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="compatible">Other compatible API</option></select></label>
+        <div class="field-grid"><label>API endpoint<input id="supervisor-url" type="url"></label><label>Supervisor model<input id="supervisor-model"></label></div>
+        <label>Supervisor API key<input id="supervisor-key" type="password" autocomplete="off" placeholder="Leave blank to keep the saved key"></label><label class="checkbox"><input id="clear-key" type="checkbox">Remove saved supervisor key</label>
+      </div>
+      <div id="proxy-fields" hidden>
+        <p class="notice">Use a provider-authorized bridge already running on this PC. Glitch does not collect account passwords, browser cookies, or subscription session tokens. Plan access and limits are determined by that bridge and its provider.</p>
+        <div class="field-grid"><label>Local bridge API URL<input id="proxy-url" type="url" placeholder="http://127.0.0.1:8317/v1"></label><label>Bridge model<input id="proxy-model" list="supervisor-options"><datalist id="supervisor-options"></datalist></label></div>
+        <label>Bridge sign-in page<input id="proxy-login-url" type="url" placeholder="http://127.0.0.1:8317"></label>
+        <label>Bridge access key (optional)<input id="proxy-token" type="password" autocomplete="off"></label><label class="checkbox"><input id="clear-proxy" type="checkbox">Remove saved bridge key</label>
+        <button id="proxy-login" type="button">Open bridge sign-in</button>
+        <p class="muted">ChatGPT subscription access requires a supported, authorized integration. Claude Pro/Max credentials cannot be used as a third-party API; use an Anthropic API key instead.</p>
+      </div>
+      <div class="connection-actions"><button id="test-supervisor" type="button">Test connection</button></div><p id="supervisor-result" class="muted" aria-live="polite"></p>
       <div class="field-grid"><label>Audit every N tool steps<input id="audit-interval" type="number" min="1" max="100" required></label><label>Maximum steps per task<input id="max-steps" type="number" min="1" max="100" required></label></div>
     </section>
     <section id="settings-discord" role="tabpanel" aria-labelledby="tab-discord" hidden>

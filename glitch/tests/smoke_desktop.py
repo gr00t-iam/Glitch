@@ -1,11 +1,10 @@
-"""Exercise real WebView2, native bridge, HTTP transport and approval UI in isolation."""
+"""Exercise real WebView2 and approval UI with deterministic worker decisions."""
 
 import json
 import base64
 import tempfile
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
@@ -23,36 +22,28 @@ def run(output_directory):
     output = Path(output_directory).resolve()
     output.mkdir(parents=True, exist_ok=True)
     result = {'passed': False, 'checks': []}
-    class OllamaFixture(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            pass
-        def do_POST(self):
-            data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-            last = data['messages'][-1]['content']
-            decision = {'message': 'The note has been written and verified.', 'tool': None, 'done': True} if last.startswith('Verified tool result') else {
-                'message': 'I will create a note after your approval.', 'done': False,
-                'tool': {'name': 'write_file', 'args': {'path': 'note.txt', 'content': 'Glitch desktop smoke test\n'}},
-            }
-            content = json.dumps({'message': {'content': json.dumps(decision)}}).encode()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
-
-    server = ThreadingHTTPServer(('127.0.0.1', 0), OllamaFixture)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
     with tempfile.TemporaryDirectory(prefix='glitch-smoke-') as temporary:
         root = Path(temporary)
         project = root / 'project'
         project.mkdir()
         store = Store(root / 'data')
         store.import_environment()
-        result['startup_endpoint'] = store.settings()['ollama_url']
         result['checks'].append('Production environment import completes before native window initialization')
-        store.save_settings({'worker_model': 'fixture', 'ollama_url': f'http://127.0.0.1:{server.server_port}'})
+        store.save_settings({'worker_model': 'fixture.gguf'})
         session = store.new_session(str(project))
-        models = ModelClient(store)
+        class FixtureWorker:
+            loaded = True
+            def status(self):
+                return {'phase': 'ready' if self.loaded else 'unloaded', 'name': 'fixture.gguf' if self.loaded else '', 'message': 'Fixture ready', 'usage': {}}
+            def close(self): self.loaded = False
+            def load(self, *_): self.loaded = True
+            def chat(self, messages, schema, cancel):
+                last = messages[-1]['content']
+                return {'message': 'The note has been written and verified.', 'tool': None, 'done': True} if last.startswith('Verified tool result') else {
+                    'message': 'I will create a note after your approval.', 'done': False,
+                    'tool': {'name': 'write_file', 'args': {'path': 'note.txt', 'content': 'Glitch desktop smoke test\n'}}}
+        models = ModelClient(store, worker=FixtureWorker())
+        (models.library.directory / 'fixture.gguf').write_bytes(b'GGUF' + (3).to_bytes(4, 'little') + bytes(24))
         engine = AgentEngine(store, models)
         api = DesktopAPI(store, engine, models)
         api._discord = DiscordGateway(store, engine)
@@ -71,16 +62,26 @@ def run(output_directory):
 
         def probe():
             try:
-                wait_for("document.getElementById('model-label').textContent === 'fixture'")
+                wait_for("document.getElementById('model-label').textContent === 'fixture.gguf'")
                 wait_for("document.querySelectorAll('.session').length === 1")
                 result['checks'].append('Bundled UI and native bridge initialized')
                 install_navigation_guard(window)
                 window.evaluate_js("location.href='https://example.invalid/'")
                 time.sleep(0.3)
-                assert window.evaluate_js("document.getElementById('model-label').textContent === 'fixture'")
+                assert window.evaluate_js("document.getElementById('model-label').textContent === 'fixture.gguf'")
                 result['checks'].append('External navigation cannot acquire the native bridge')
                 window.evaluate_js("document.getElementById('settings-open').click()")
                 wait_for("document.getElementById('settings-dialog').open")
+                wait_for("document.getElementById('worker-model').value === 'fixture.gguf'")
+                window.evaluate_js("document.getElementById('unload-model').click()")
+                wait_for("document.getElementById('inference-status').textContent === 'Fixture ready'")
+                window.evaluate_js("document.getElementById('load-model').click()")
+                wait_for("document.getElementById('save-result').textContent === 'Saved locally'")
+                wait_for("document.getElementById('inference-status').textContent.includes('fixture.gguf')")
+                result['checks'].append('Model library selector and load/unload controls work through the native bridge')
+                window.evaluate_js("document.getElementById('tab-supervisor').click();document.getElementById('supervisor-auth').value='proxy';document.getElementById('supervisor-auth').dispatchEvent(new Event('change'))")
+                wait_for("!document.getElementById('proxy-fields').hidden && document.getElementById('api-fields').hidden")
+                result['checks'].append('Subscription bridge fields replace developer API fields without exposing credentials')
                 window.evaluate_js("document.getElementById('tab-discord').click()")
                 wait_for("!document.getElementById('settings-discord').hidden")
                 window.evaluate_js("document.getElementById('settings-close').click()")
@@ -92,7 +93,7 @@ def run(output_directory):
                 window.evaluate_js("document.getElementById('approve').click()")
                 wait_for("document.getElementById('status').textContent.includes('completed')")
                 assert (project / 'note.txt').read_text() == 'Glitch desktop smoke test\n'
-                result['checks'].append('Approved write executes through real HTTP worker transport')
+                result['checks'].append('Approved write executes through deterministic embedded-worker interface')
                 messages = store.messages(session)
                 assert any(m['role'] == 'context' for m in messages)
                 result['checks'].append('Verified tool evidence persists across turns')
@@ -126,6 +127,4 @@ def run(output_directory):
         webview.start(gui='edgechromium', private_mode=True, debug=False)
         result['checks'].append('Disposed WebView2 closes without a framework exception')
         (output / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
-    server.shutdown()
-    server.server_close()
     return result

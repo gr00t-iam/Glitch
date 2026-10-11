@@ -64,6 +64,7 @@ def main():
     def close():
         engine.stop()
         api._discord.stop()
+        models.close()
     window.events.closed += close
     webview.start(gui='edgechromium', private_mode=True, debug=False)
 

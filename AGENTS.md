@@ -2,7 +2,7 @@
 
 The application is Glitch: a local-first Windows desktop AI companion built in Python/PyWebView and distributed as Glitch.exe. The supported implementation is in glitch/. End users must not need npm, Node.js, Python, or terminal scripts to run the packaged app.
 
-Document actual capabilities and limits: a local Ollama worker, optional cloud audits, persistent conversations and correction anchors, approval-gated workspace/computer tools, and owner-restricted Discord control. Never imply that retained prototype features are available in the executable.
+Document actual capabilities and limits: an embedded llama.cpp GGUF worker with in-app model management, optional developer API or authorized local-bridge audits, persistent conversations and correction anchors, approval-gated workspace/computer tools, and owner-restricted Discord control. Never imply that retained prototype features are available in the executable. Do not fabricate provider OAuth identities or intermediate consumer subscription credentials.
 
 Keep safety approvals, workspace boundaries, credential protection and persistent evidence intact. Treat src/, desktop/, runtime/ and server/ as legacy development references. The canonical repository is https://github.com/gr00t-iam/Glitch.
 

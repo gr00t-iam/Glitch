@@ -19,6 +19,11 @@ DEFAULTS = {
     'supervisor_model': 'anthropic/claude-sonnet-4.6',
     'audit_interval': 5, 'max_steps': 40,
     'discord_user_id': '', 'discord_channel_id': '',
+    'context_length': 4096, 'cpu_threads': max(1, min(8, (os.cpu_count() or 2) - 1)),
+    'temperature': 0.15, 'vision_projector': '',
+    'supervisor_auth': 'api', 'supervisor_provider': 'openrouter',
+    'proxy_url': 'http://127.0.0.1:8317/v1', 'proxy_login_url': 'http://127.0.0.1:8317',
+    'proxy_model': '',
 }
 
 
@@ -130,6 +135,7 @@ class Store:
         result['key_saved'] = (self.directory / 'supervisor.dpapi').exists()
         result['discord_token_saved'] = (self.directory / 'discord.dpapi').exists() or bool(os.environ.get('DISCORD_TOKEN'))
         result['key_saved'] = result['key_saved'] or bool(os.environ.get('CLOUD_SUPERVISOR_API_KEY'))
+        result['proxy_token_saved'] = (self.directory / 'proxy.dpapi').exists()
         return result
 
     def save_settings(self, update):
@@ -137,6 +143,20 @@ class Store:
         values = {k: update.get(k, current[k]) for k in DEFAULTS}
         if values['mode'] not in ('local', 'hybrid'):
             raise ValueError('Choose local or hybrid mode.')
+        if values['supervisor_auth'] not in ('api', 'proxy'):
+            raise ValueError('Choose developer API or authorized account bridge.')
+        if values['supervisor_provider'] not in ('openrouter', 'openai', 'anthropic', 'compatible'):
+            raise ValueError('Choose a supported supervisor provider.')
+        from glitch.supervisor import loopback_url
+        for name in ('proxy_url', 'proxy_login_url'):
+            values[name] = loopback_url(values[name])
+        values['context_length'] = int(values['context_length'])
+        values['cpu_threads'] = int(values['cpu_threads'])
+        values['temperature'] = float(values['temperature'])
+        if not 1024 <= values['context_length'] <= 32768:
+            raise ValueError('Context length must be between 1024 and 32768 tokens.')
+        if not 1 <= values['cpu_threads'] <= 128 or not 0 <= values['temperature'] <= 2:
+            raise ValueError('Use 1-128 CPU threads and a temperature between 0 and 2.')
         for name in ('ollama_url', 'supervisor_url'):
             if name == 'ollama_url':
                 values[name] = ollama_endpoint(values[name])
@@ -152,7 +172,7 @@ class Store:
             values[name] = int(values[name])
             if not 1 <= values[name] <= 100:
                 raise ValueError('Step limits must be between 1 and 100.')
-        for name in ('worker_model', 'supervisor_model'):
+        for name in ('worker_model', 'supervisor_model', 'proxy_model', 'vision_projector'):
             if not isinstance(values[name], str) or len(values[name]) > 200:
                 raise ValueError('Invalid model name.')
         for name in ('discord_user_id', 'discord_channel_id'):
@@ -172,6 +192,12 @@ class Store:
             temporary.replace(self.directory / 'discord.dpapi')
         elif update.get('clear_discord_token'):
             (self.directory / 'discord.dpapi').unlink(missing_ok=True)
+        if update.get('proxy_token'):
+            temporary = self.directory / 'proxy.tmp'
+            temporary.write_bytes(protect(update['proxy_token'].strip().encode()))
+            temporary.replace(self.directory / 'proxy.dpapi')
+        elif update.get('clear_proxy_token'):
+            (self.directory / 'proxy.dpapi').unlink(missing_ok=True)
         with self.lock, self.connect() as db:
             db.executemany('INSERT OR REPLACE INTO settings VALUES (?,?)',
                            [(k, json.dumps(v)) for k, v in values.items()])
@@ -184,6 +210,10 @@ class Store:
     def discord_token(self):
         path = self.directory / 'discord.dpapi'
         return os.environ.get('DISCORD_TOKEN') or (protect(path.read_bytes(), decrypt=True).decode() if path.exists() else '')
+
+    def proxy_token(self):
+        path = self.directory / 'proxy.dpapi'
+        return protect(path.read_bytes(), decrypt=True).decode() if path.exists() else ''
 
     def import_environment(self):
         self.startup_warnings = []

@@ -23,6 +23,17 @@ jobs:
         run: python -m unittest discover -s glitch/tests -v
       - name: Build standalone application
         run: python -m PyInstaller --noconfirm --clean glitch/Glitch.spec
+      - name: Download pinned native inference test fixture
+        run: |
+          python -c "from pathlib import Path; from glitch.model_manager import ModelManager; m=ModelManager(Path('glitch-test-output/models')); m.download('https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf', '66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739'); m.wait(120); assert m.status()['phase']=='complete', m.status()"
+      - name: Verify frozen native inference and child process
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path dist/Glitch.exe) -ArgumentList '--inference-test', 'glitch-test-output/frozen-inference', 'glitch-test-output/models/stories15M-q4_0.gguf' -PassThru -WindowStyle Hidden
+          if (-not $p.WaitForExit(60000)) { Stop-Process -Id $p.Id; throw 'Native inference timed out' }
+          if ($p.ExitCode -ne 0) { throw "Native inference exited $($p.ExitCode)" }
+          $result = Get-Content glitch-test-output/frozen-inference/result.json -Raw | ConvertFrom-Json
+          if (-not $result.passed) { throw 'Frozen native inference failed' }
+          Get-Content glitch-test-output/frozen-inference/result.json
       - name: Record executable checksum
         run: (Get-FileHash dist/Glitch.exe -Algorithm SHA256).Hash | Set-Content dist/Glitch.exe.sha256
       - uses: actions/upload-artifact@v4

@@ -111,11 +111,11 @@ class AgentEngine:
             def system():
                 return {'role': 'system', 'content': base + '\nPersistent course corrections:\n' + '\n'.join(self.store.anchors(session))}
             messages = [system()] + [m | {'role': 'user'} if m['role'] == 'context' else m for m in self.store.messages(session)]
-            self._emit('started', 'Glitch is processing locally via Ollama', {'model': settings['worker_model'], 'workspace': workspace})
+            self._emit('started', 'Glitch is processing locally...', {'model': settings['worker_model'], 'workspace': workspace})
             for step in range(1, settings['max_steps'] + 1):
                 if self.cancelled.is_set():
                     raise InterruptedError('Stopped by you.')
-                self._emit('local', 'Glitch is processing locally via Ollama', {'step': step})
+                self._emit('local', 'Glitch is processing locally...', {'step': step})
                 messages[0] = system()
                 decision = self.models.chat(settings, messages, self.cancelled)
                 try:

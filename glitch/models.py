@@ -1,11 +1,10 @@
-"""Bounded HTTP calls to Ollama and OpenAI-compatible cloud supervisors."""
+"""Embedded worker and optional supervisor, independent of external model servers."""
 
-import json
 import threading
 
-import requests
-
-from glitch.storage import redact
+from glitch.local_inference import EmbeddedWorker
+from glitch.model_manager import ModelManager
+from glitch.supervisor import SupervisorBridge
 
 DECISION_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -19,58 +18,54 @@ DECISION_SCHEMA = {
 
 
 class ModelClient:
-    def __init__(self, store):
+    def __init__(self, store, worker=None):
         self.store = store
+        self.library = ModelManager(store.directory / 'models')
+        self.worker = worker or EmbeddedWorker()
+        self.supervisor = SupervisorBridge(store)
+        self._load_thread = None
+        self._cancel_load = threading.Event()
+        self._load_lock = threading.Lock()
 
-    @staticmethod
-    def _check(response, provider):
-        if not response.ok:
-            raise RuntimeError(f'{provider} returned HTTP {response.status_code}. Check the endpoint, model and credentials.')
+    def discover(self, settings=None):
+        return self.library.catalog()
 
-    def discover(self, settings):
-        with requests.get(settings['ollama_url'] + '/api/tags', timeout=(5, 15), allow_redirects=False) as response:
-            self._check(response, 'Ollama')
-            return [{'name': m['name'], 'size': m.get('size', 0)} for m in response.json().get('models', [])]
+    def status(self):
+        return {'transfer': self.library.status(), 'inference': self.worker.status(), 'models': self.discover()}
 
-    def chat(self, settings, messages, cancel: threading.Event):
-        if not settings['worker_model']:
-            raise ValueError('Choose a downloaded local model in Settings.')
+    def load(self, settings):
+        path = self.library.path(settings['worker_model'])
+        projector = self.library.path(settings['vision_projector']) if settings['vision_projector'] else None
+        with self._load_lock:
+            if self._load_thread and self._load_thread.is_alive():
+                raise ValueError('A model is already loading.')
+            self._cancel_load.clear()
+            def run():
+                try:
+                    self.worker.load(path, settings, self._cancel_load, projector)
+                except Exception:
+                    # The worker exposes the error through its status, without a background traceback.
+                    pass
+            self._load_thread = threading.Thread(target=run, daemon=True)
+            self._load_thread.start()
+        return {'ok': True, 'message': 'Loading model...'}
+
+    def chat(self, settings, messages, cancel):
         if cancel.is_set():
             raise InterruptedError('Stopped.')
-        try:
-            with requests.post(settings['ollama_url'] + '/api/chat', json={
-                'model': settings['worker_model'], 'messages': messages,
-                'format': DECISION_SCHEMA, 'stream': False, 'options': {'temperature': 0.15},
-            }, timeout=(5, 120), allow_redirects=False) as response:
-                self._check(response, 'Ollama')
-                data = response.json()
-            if cancel.is_set():
-                raise InterruptedError('Stopped.')
-            return json.loads(data['message']['content'])
-        except requests.RequestException as error:
-            raise RuntimeError('Cannot reach Ollama. Check that the Ollama Windows app is running and the endpoint is correct.') from error
+        if self.worker.status()['name'] != settings['worker_model']:
+            raise ValueError('Load the selected GGUF model in Model Manager before starting a task.')
+        return self.worker.chat(messages, DECISION_SCHEMA, cancel)
 
     def review(self, settings, task, actions, reason, cancel):
-        key = self.store.supervisor_key()
-        if not key:
-            raise RuntimeError('Hybrid mode needs a supervisor API key in Settings.')
-        if cancel.is_set():
-            raise InterruptedError('Stopped.')
-        # Only a bounded, redacted audit is sent outside the machine, never the complete conversation.
-        audit = redact(json.dumps({'task': task, 'reason': reason, 'recent_actions': actions[-15:]}))[:24000]
-        with requests.post(settings['supervisor_url'] + '/chat/completions', headers={
-            'Authorization': 'Bearer ' + key, 'X-Title': 'Glitch Desktop',
-        }, json={
-            'model': settings['supervisor_model'], 'temperature': 0.1, 'max_tokens': 600,
-            'messages': [
-                {'role': 'system', 'content': 'You are Glitch, an auditor of a local worker. Inspect actual tool evidence for errors, loops and unsupported claims. Return a concise Course Correction Directive with the next verified steps. Do not grant approvals, repeat credentials, or suggest bypassing safety. If no drift exists, say so and give a brief continuation anchor.'},
-                {'role': 'user', 'content': audit},
-            ],
-        }, timeout=(5, 60), allow_redirects=False) as response:
-            self._check(response, 'Supervisor')
-            directive = response.json()['choices'][0]['message']['content']
-        if cancel.is_set():
-            raise InterruptedError('Stopped.')
-        if not isinstance(directive, str) or not directive.strip():
-            raise RuntimeError('Supervisor returned an empty directive.')
-        return redact(directive.strip()[:6000])
+        return self.supervisor.review(settings, task, actions, reason, cancel)
+
+    def unload(self):
+        self._cancel_load.set()
+        if self._load_thread and self._load_thread.is_alive():
+            self._load_thread.join(timeout=7)
+        self.worker.close()
+
+    def close(self):
+        self.library.cancel()
+        self.unload()

@@ -1,69 +1,92 @@
 # Glitch for Windows
 
-Glitch is a standalone Python desktop agent with a robotic owl companion, local Ollama reasoning, optional cloud supervision, approved computer control, and one-owner Discord access. The UI is bundled HTML/CSS/JavaScript displayed by PyWebView and Microsoft Edge WebView2. There is no Node.js or npm dependency in this application or its build.
+A standalone Python/PyWebView agent with a robotic owl companion, embedded GGUF reasoning, optional cloud supervision, approval-gated computer control and owner-locked Discord access. The executable includes its Python runtime and llama.cpp CPU inference engine. No Ollama, LM Studio, Node.js, npm or Python installation is needed to run it.
 
-## Launch the application
+## First launch
 
-1. Download `Glitch.exe` from [the latest Glitch release](https://github.com/gr00t-iam/Glitch/releases/latest) or the **Glitch Windows** workflow artifact. Extract the artifact ZIP if using Actions.
-2. Install Microsoft Edge WebView2 Evergreen Runtime if Windows does not already have it. Windows 10/11 x64 and .NET Framework 4.8 are required by the native wrapper.
-3. Install and open the Ollama Windows application, then download a local model in Ollama. Choose a vision-capable model for screenshot-based desktop navigation.
-4. Double-click `Glitch.exe`. No Python, npm, or terminal is required to run the packaged app.
-5. Click **+** next to **Projects** and select a trusted project folder. Open **Settings & connections**, check the Ollama endpoint, click **Find local models**, choose a downloaded model, and save.
-6. Send a task. Inspect the execution timeline and approve the exact file diff, command, or computer action when prompted.
+1. Download `Glitch.exe` from [the latest release](https://github.com/gr00t-iam/Glitch/releases/latest), or extract the Glitch Windows Actions artifact ZIP.
+2. Use Windows 10/11 x64 with Microsoft Edge WebView2 Runtime and .NET Framework 4.8 installed. Install Chrome for browser tasks.
+3. Double-click `Glitch.exe`. Use **Projects +** to select a trusted project folder.
+4. Open **Settings & connections > Model Manager**. Paste a public Hugging Face GGUF file URL and click **Download model**, or **Import GGUF file** from your PC.
+5. Select an instruction-tuned model that fits your RAM and click **Load model**. Wait for **Ready for local tasks**.
+6. Send a task. Watch the timeline and approve exact file diffs, command recipes and computer actions before they execute.
 
-The executable contains the app and its Python runtime. Model weights, Ollama, Chrome, and project-specific compilers/interpreters are separate installations. `python_tests`, Git and .NET recipes require their corresponding tools on the host. Glitch does not install them or impersonate a successful execution if they are missing.
+Model weights are downloaded separately because of their size and licensing. Chrome, Windows WebView2 and project-specific compilers/interpreters are not bundled. Git, Python tests and .NET recipes require the corresponding tools on the host. Glitch never reports a missing tool as successfully executed.
 
-## Hybrid supervisor
+## Built-in Model Manager
 
-Select **Hybrid** in Settings, enter an OpenRouter or OpenAI-compatible API endpoint, its model ID, and an API key. The default endpoint is `https://openrouter.ai/api/v1`; choose a model available to your account.
+The library lives in `%LOCALAPPDATA%\Glitch\models`. Download/import jobs run in a background thread with byte progress, cancel controls and immediate error feedback. Use a public HTTPS Hugging Face file URL ending in `.gguf`, not a repository page, gated file, signed URL or split model part. Trusted Hugging Face CDN redirects are supported. Transfers above 128 GB are rejected; there is no 10 MB model cap.
 
-The worker stays local. Glitch sends a bounded audit to the cloud after every five tool actions (configurable), a tool failure, invalid worker output, or three repeated identical actions. The audit contains the task and at most the last 15 redacted action records, including snippets of file contents or command output. Screenshots and complete conversation history are excluded from cloud audits. Redaction reduces accidental credential disclosure but cannot identify every custom secret; use local-only mode for confidential projects.
+Transfers check GGUF headers, expected length and optional publisher SHA256. Canceled, incomplete and checksum-mismatched files are deleted. Atomic publication keeps partial files out of the catalog. Import copies a local GGUF into the library. Refresh, select, load, unload and delete models inside the UI.
 
-Cloud directives are saved in SQLite and re-injected into the local worker's system instruction before every subsequent step and future turn in that conversation. Conversation history and verified tool evidence survive restarts. Local-only mode makes no supervisor requests. Cloud failures pause the task visibly rather than silently skipping the audit. Six repeated identical actions stop the loop even if cloud guidance fails to resolve it.
+The portable build uses CPU inference, not automatic CUDA acceleration. Configure CPU threads, temperature and context before loading. Large contexts use more memory. Unsupported architectures or insufficient RAM produce a visible error. There is no hidden fallback to an external model server. Context overflow pauses rather than silently dropping conversation history or correction anchors.
 
-## Discord setup
+Inference runs in a persistent isolated child process. Stop interrupts native inference by terminating that process; reload before continuing. Unload and shutdown release it. A model-process crash does not close the dashboard. This isolation protects stability, not the operating system: use trusted model publishers.
 
-1. Create an application and bot in the Discord Developer Portal. Enable **Message Content Intent** for the bot.
-2. Invite the bot to a private server channel with **View Channel**, **Send Messages**, **Read Message History**, and **Attach Files** permissions. Deny `@everyone` permission to view the channel. Do not grant Administrator.
-3. Enable Discord Developer Mode and copy your **User ID** and the private **Channel ID**.
-4. Enter the bot token, your User ID and Channel ID in Glitch's **Discord control** settings. Save, then **Connect Discord**. Leave Channel ID blank to allow direct messages from your User ID only.
-5. Send `!task <instructions>`, `!status`, or `!stop`. Remote tasks use the project of the most recently created conversation. Choose it in the app before leaving.
-6. Approve actions with Discord's **Approve Action** button or deny them with **Abort & Rewrite**. The owner and channel are checked again on every button interaction. Approvals expire after five minutes and cannot be reused. The desktop app can approve the same pending action; stale Discord buttons cannot execute it again.
+Screenshot reasoning requires a compatible **LLaVA 1.5 model and projector GGUF**, both selected in Model Manager. Other vision formats are not automatically supported. Text models cannot pretend to inspect screenshots; they can use browser DOM/text tools. Model quality still determines reasoning and visual accuracy.
 
-The listener reconnects through Discord's gateway. Status, tool actions, correction directives, command output, final text and approved screenshots are batched back to the authorized channel. Unauthorized messages are ignored. If sending task updates fails, Glitch stops the remote task. Disconnecting Discord stops its active remote task. Changing saved Discord identity or token disconnects the listener so the old identity cannot remain active.
+## Hybrid supervision
 
-Glitch must stay open; Windows must remain awake and the desktop unlocked for computer control. This is a desktop app, not a Windows service. Do not use a personal Discord account token.
+In **Supervision**, choose **Hybrid**, then **Developer API** or **Subscription account - authorized local bridge**. Worker-only mode never needs a cloud key.
 
-## Computer use and execution policy
+### Developer API
 
-- `list_workspace`, `read_file`, `write_file`: project files only. Resolved paths cannot escape the selected workspace. `.git`, `.env*`, private keys, known credential directories and Glitch's database are protected. Writes require approval, display a diff, detect edits made while waiting for approval, and replace files atomically.
-- `run_command`: approved fixed recipes (`git_status`, `git_diff`, `git_log`, `python_tests`, `dotnet_build`, `list_directory`). Uses subprocess argument arrays with `shell=False`; command strings from the model are never passed to a shell. Output streams into the timeline and Discord, is bounded, and commands time out after 120 seconds. Stop terminates the subprocess tree on Windows. Project tests/builds can execute project code; approve them only for trusted workspaces.
-- `desktop_screenshot`, `desktop_input`: approved primary-screen capture, move, click, typing, individual keys, hotkeys (e.g. `ctrl+shift+s`) and scrolling. Screenshots include native dimensions and are attached to the next Ollama request. Move the mouse to a screen corner for PyAutoGUI's fail-safe. Unicode typing temporarily uses and restores the clipboard; browser field entry supports Unicode directly. Browser tab IDs are returned by `tabs` and accepted as `tab_id` on subsequent actions.
-- `browser_action`: approved Chrome navigation, tab listing, visible text, CSS selector clicks/fills and screenshots. Chrome uses `%LOCALAPPDATA%\Glitch\chrome-profile` and port **9222**, bound to **127.0.0.1**. An existing unrelated debugging session is rejected. No remote Chrome port is published. Install Google Chrome first.
+Choose OpenRouter, OpenAI, Anthropic or another compatible API. The UI supplies the base URL; configure a model available to your account and its API key. OpenAI-compatible providers use `/chat/completions` with Bearer authentication. Anthropic uses native `/messages`, `x-api-key` and the API version header. **Test connection** lists accessible models; it does not prove generation permission, available credits or unlimited access. Developer API billing is separate from consumer subscriptions.
 
-Native desktop automation requires the same privilege level as the target window. Glitch does not elevate itself, defeat Windows security prompts, or bypass approval through cloud advice. Shell recipes are a policy boundary, not an OS sandbox. Chrome runs as a separate controlled browser window; approved screenshots appear inside Glitch's timeline. Other installed tabs and browser profiles are untouched.
+### Authorized account bridge
 
-Every screenshot requires approval, including explicit notice that remote task captures are shared to Discord. Captures stay in `%LOCALAPPDATA%\Glitch\captures`; remove unwanted captures in File Explorer. Ollama must support images for visual reasoning; text-only models still work with file and browser-text tools.
+Configure a provider-authorized bridge on your PC exposing `GET /v1/models` and `POST /v1/chat/completions`. Enter its loopback API URL, model, optional bridge access key and local sign-in page. **Open bridge sign-in** launches that page in your normal browser. Complete the provider's authorized flow there, then **Test connection** in Glitch.
 
-## Optional environment variables
+The bridge owns OAuth, refresh tokens, plan entitlement and usage limits. Glitch stores only the optional bridge access key using Windows DPAPI. Only `127.0.0.1`, `::1` or `localhost` URLs are accepted, without embedded credentials, query strings or redirects. Keep that port private. The bridge must be configured separately; it is not bundled and Glitch does not provide a universal subscription proxy.
 
-Settings provide the normal setup path; these variables are only needed for managed deployments.
+Glitch does not collect account passwords, cookies or consumer OAuth tokens, and does not impersonate official OAuth clients. ChatGPT subscription routing requires a supported, authorized integration: see [OpenAI sign-in documentation](https://developers.openai.com/siwc). A Plus plan alone does not make the general API free. [Anthropic's authentication rules](https://code.claude.com/docs/en/legal-and-compliance) prohibit third-party apps offering Claude.ai login or routing through Pro/Max credentials. Use an Anthropic developer API key instead. Unmodified native provider applications are a different integration and are not bundled here.
+
+### Audit and memory contract
+
+The supervisor is consulted after every five tool steps (configurable), a tool failure, invalid worker decision or three repeated identical actions. A bounded audit contains the task and up to 15 recent redacted action records, including file/output snippets. Full conversation history and screenshots are excluded. Redaction cannot recognize every custom secret; keep confidential projects in worker-only mode.
+
+Course Correction Directives persist in SQLite and are injected into the local system instruction before every later step and future turn of that conversation. Conversation history and verified evidence survive restarts. Cloud failures pause visibly instead of skipping the audit. Six identical repeated actions stop the loop. Supervisor advice never approves an action or elevates privileges.
+
+## Discord control
+
+1. Create a bot in the Discord Developer Portal and enable **Message Content Intent**. Never use a personal account token.
+2. Invite it to a private channel with **View Channel**, **Send Messages**, **Read Message History** and **Attach Files**. Deny `@everyone` access; do not grant Administrator.
+3. Copy your User ID and private Channel ID in Discord Developer Mode.
+4. Enter the bot token and IDs in **Discord control**, save and connect. Leaving Channel ID blank allows owner-only direct messages.
+5. Use `!task <instructions>`, `!status` or `!stop`. Remote tasks use the most recently created conversation's project. Load the local model and select the project before leaving.
+6. Use **Approve Action** or **Abort & Rewrite** on remote approval messages. Ownership/channel checks apply again to every button; approvals expire after five minutes and cannot be reused. The desktop UI can resolve the same pending approval.
+
+The async gateway reconnects automatically. Status, tool actions, corrections, command output, final text and approved screenshots are batched back to the authorized channel. Unauthorized messages are ignored. Failed update delivery stops remote tasks. Disconnecting stops its active remote task; changing credentials/identity disconnects the old listener.
+
+Glitch must remain open and Windows awake. Desktop control needs an unlocked session. This app is not a Windows service. Live account behavior requires your credentials and permissions.
+
+## Computer use and safety
+
+- `list_workspace`, `read_file`, `write_file`: resolved project paths only. Traversal, `.git`, `.env*`, private keys, known credential directories and Glitch's own data are protected. Writes show diffs, require approval, detect intervening edits and replace files atomically.
+- `run_command`: fixed recipes (`git_status`, `git_diff`, `git_log`, `python_tests`, `dotnet_build`, `list_directory`) with argument arrays and `shell=False`. No model-generated shell strings. Output streams to the timeline and Discord, is bounded, and times out after 120 seconds. Stop terminates the Windows subprocess tree. Tests/builds execute project code: approve only trusted workspaces.
+- `desktop_screenshot`, `desktop_input`: approved primary-screen screenshots, move, click, Unicode typing, keys, hotkeys and scrolling. Screenshots carry native dimensions to the local vision model. Unicode typing temporarily uses and restores the clipboard. Move the pointer to a screen corner to trigger PyAutoGUI's fail-safe.
+- `browser_action`: approved navigation, tab listing, visible text, CSS-selector clicks/fills and screenshots. Returned tab IDs select pages. Chrome uses `%LOCALAPPDATA%\Glitch\chrome-profile`, loopback **127.0.0.1:9222** and a separate controlled window. An unrelated existing debugging session is rejected. Your regular browser profile and tabs are untouched.
+
+Every screenshot requires approval and explicitly warns when a remote capture will be sent to Discord. Captures remain in `%LOCALAPPDATA%\Glitch\captures`; remove unwanted captures in File Explorer. Desktop control needs the same privilege level as the target window. Glitch does not defeat Windows prompts, automatically elevate or bypass approvals through supervisor advice. Recipe allowlists and process isolation are not an OS sandbox.
+
+## Configuration and storage
+
+Use Settings for normal setup. Optional managed-deployment variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `DISCORD_TOKEN` | Bot token; takes precedence over the Windows-encrypted saved token. |
-| `DISCORD_USER_ID` | Sole authorized user, imported into settings at startup. |
-| `DISCORD_CHANNEL_ID` | Optional private server channel; blank restricts control to owner DMs. |
-| `OLLAMA_HOST` | Ollama host or HTTP(S) base URL, e.g. `localhost:11434`. Wildcard server bind addresses such as `0.0.0.0` automatically connect through loopback on port 11434. Invalid optional overrides are ignored with an in-app warning; saved settings remain available. |
-| `CLOUD_SUPERVISOR_API_KEY` | OpenAI-compatible cloud key; takes precedence over the saved key. |
+| `DISCORD_TOKEN` | Bot token; overrides the encrypted saved token. |
+| `DISCORD_USER_ID` | Sole authorized owner, imported at startup. |
+| `DISCORD_CHANNEL_ID` | Optional private channel; blank allows owner-only DMs. |
+| `CLOUD_SUPERVISOR_API_KEY` | Developer API key; overrides the saved API key and is never used by bridge mode. |
 
-Keys are never returned from the Python bridge, saved as plaintext settings, or inserted into model instructions. Saved credentials are encrypted using Windows DPAPI for the current Windows user. Environment-provided keys remain active until removed from the environment; clearing a saved key cannot remove an environment override. Settings and chat data live in `%LOCALAPPDATA%\Glitch`, outside the executable extraction directory.
+Older `OLLAMA_HOST` settings are retained only for migration compatibility, never used for inference. Replace old server-model names with GGUF library entries. Invalid optional overrides are ignored with an in-app warning, not a startup crash.
 
-## Build from source on Windows
+Saved API, bridge and Discord keys use Windows DPAPI for the current user. Keys are not returned by the native bridge or inserted into model prompts. Clearing a saved key cannot remove an environment override. Conversations, events and anchors use SQLite under `%LOCALAPPDATA%\Glitch`, outside the executable extraction directory. Back up this directory; encrypted secrets remain tied to your Windows identity.
 
-Only developers building the executable need Python. Install **Python 3.12 x64** with the `py` launcher, then double-click **Build Glitch.cmd** in the repository root. It creates an isolated environment, installs Python dependencies, runs the tests, and builds `dist\Glitch.exe`.
+## Build a single executable
 
-Equivalent exact commands, run from the repository root:
+Only developers need **Python 3.12 x64**. Double-click **Build Glitch.cmd**, or run these exact commands from the repository root:
 
 ```powershell
 py -3.12 -m venv .venv-glitch
@@ -72,39 +95,44 @@ py -3.12 -m venv .venv-glitch
 .\.venv-glitch\Scripts\python.exe -m PyInstaller --noconfirm --clean glitch\Glitch.spec
 ```
 
-The checked-in spec creates a single windowed executable containing the Python runtime, native wrapper dependencies, Discord client, computer tools and all UI assets. Build Windows binaries on Windows. A GitHub Actions Windows runner performs the same tests and build and publishes a downloadable artifact for each change.
+Launch `dist\Glitch.exe`. The checked-in spec bundles Python, CPU native DLLs, NumPy, PyWebView, Discord, computer tools and offline UI assets into one windowed file. The lock uses the official llama-cpp-python CPU wheel index and requires a binary wheel, so a C++ compiler is unnecessary. Build Windows binaries on Windows. GitHub Actions runs tests and builds an artifact.
 
-`requirements-lock.txt` pins the complete tested Windows build environment; `requirements.txt` lists the direct dependencies. The optional `Start Glitch.cmd` shortcut launches the compiled app and never invokes npm or a development server.
+For source development, run `.\.venv-glitch\Scripts\python.exe -m glitch.main`. The optional **Start Glitch.cmd** only launches a compiled executable; it does not start npm or a development server. Unsigned builds may trigger SmartScreen. Signing requires your organization's own code-signing certificate.
 
-For source development only:
+### Verification
 
 ```powershell
-.\.venv-glitch\Scripts\python.exe -m glitch.main
+dist\Glitch.exe --inference-test glitch-test-output\inference C:\Models\your-model.gguf
+dist\Glitch.exe --smoke-test glitch-test-output\desktop
 ```
 
-Unsigned builds may show Windows SmartScreen warnings. Production distribution should sign the finished executable with your organization's code-signing certificate; no signing identity or certificate is included in this repository.
+Each writes `result.json` to its output directory. The inference test loads real weights, generates schema-constrained JSON without HTTP and unloads the child process. The native UI test uses deterministic worker decisions for settings, approvals, navigation protection and lifecycle checks. A tiny test model proves packaging, not long-horizon agent quality. Paid/API/subscription and Discord checks with live accounts require your credentials; fixture tests are not live account validation.
 
-## Structure
+## Source structure
 
 ```text
 glitch/
-  main.py              Native window, startup and shutdown
-  launcher.py          PyInstaller entry point
-  api.py               Narrow UI-to-Python bridge
-  storage.py           SQLite persistence and Windows DPAPI
-  models.py            Ollama worker and cloud supervisor HTTP clients
-  monitor.py           Step, error and repeated-action triggers
-  engine.py            Agent loop, approvals and persistent anchors
-  tools.py             Approved file and fixed command tools
-  computer.py          Desktop input, screenshots and Chrome CDP
-  discord_bot.py       Owner-locked async gateway and remote approvals
-  ui/                  Offline HTML, CSS, JavaScript and owl mascot
-  tests/               Runtime, transport and security regressions
-  requirements.txt     Python dependencies
-  Glitch.spec          One-file Windows build
-Build Glitch.cmd        Double-click source build helper
+  main.py              Native window, startup, shutdown and navigation guard
+  launcher.py          One-file entry point and freeze_support
+  api.py               Narrow trusted UI-to-Python bridge
+  storage.py           SQLite history/evidence/anchors and Windows DPAPI
+  models.py            Embedded worker facade and lifecycle coordination
+  local_inference.py   Isolated llama.cpp process and schema-constrained decisions
+  model_manager.py     Background GGUF download/import and local catalog
+  supervisor.py        Native/API and authorized loopback bridge transport
+  monitor.py           Step, error and loop triggers
+  engine.py            Agent loop, approvals and correction injection
+  tools.py             Workspace files and fixed command recipes
+  computer.py          Desktop automation and isolated Chrome CDP
+  discord_bot.py       Owner-locked async control and remote approvals
+  desktop_runtime.py   Guarded WebView2 shutdown
+  ui/                  Bundled HTML/CSS/JS and owl mascot
+  tests/               Regression and native/frozen smoke checks
+  requirements-lock.txt
+  Glitch.spec          Exact one-file Windows build
+Build Glitch.cmd        Double-click build helper
 ```
 
-The retained [PWA and Electron prototypes](../docs/legacy-development.md) are development references, not the supported desktop application. They are not loaded by `Glitch.exe`. Their stores, slash commands and repository tooling do not imply those features are present in the executable.
+The [retained PWA/Electron prototypes](../docs/legacy-development.md) are development references, not features loaded by the executable.
 
-Implementation references: [PyWebView native bridge](https://pywebview.flowrl.com/guide/usage.html), [PyInstaller spec files](https://pyinstaller.org/en/stable/spec-files.html), [Discord gateway intents](https://discordpy.readthedocs.io/en/stable/intents.html), [PyAutoGUI fail-safe behavior](https://pyautogui.readthedocs.io/en/latest/index.html), and [Chrome's isolated debugging profile requirement](https://developer.chrome.com/blog/remote-debugging-port).
+References: [llama-cpp-python and CPU wheels](https://github.com/abetlen/llama-cpp-python), [PyWebView](https://pywebview.flowrl.com/guide/usage.html), [PyInstaller specs](https://pyinstaller.org/en/stable/spec-files.html), [Discord intents](https://discordpy.readthedocs.io/en/stable/intents.html), [PyAutoGUI](https://pyautogui.readthedocs.io/en/latest/index.html), [Chrome debugging profiles](https://developer.chrome.com/blog/remote-debugging-port).

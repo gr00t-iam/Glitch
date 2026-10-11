@@ -12,7 +12,7 @@ from glitch.tools import WorkspaceTools
 
 
 class TransportTests(unittest.TestCase):
-    def test_http_worker_discovery_and_supervisor_payloads(self):
+    def test_embedded_worker_and_supervisor_payloads(self):
         captured = []
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_):
@@ -40,16 +40,24 @@ class TransportTests(unittest.TestCase):
                 store = Store(Path(folder))
                 url = f'http://127.0.0.1:{server.server_port}'
                 settings = store.save_settings({'worker_model': 'fixture', 'ollama_url': url, 'supervisor_url': url})
-                client = ModelClient(store)
-                self.assertEqual(client.discover(settings), [{'name': 'fixture', 'size': 123}])
+                class Worker:
+                    def status(self): return {'phase': 'ready', 'name': 'fixture'}
+                    def chat(self, messages, schema, cancel):
+                        self.messages, self.schema = messages, schema
+                        return {'message': 'Hello', 'tool': None, 'done': True}
+                worker = Worker()
+                client = ModelClient(store, worker=worker)
+                self.assertEqual(client.discover(settings), [])
                 decision = client.chat(settings, [{'role': 'user', 'content': 'Hello'}], threading.Event())
                 self.assertTrue(decision['done'])
                 with patch.object(store, 'supervisor_key', return_value='test-key'):
                     directive = client.review(settings, 'Inspect', [{'tool':'read_file','args':{},'ok':False,'result':{'text':'password: secret'}}], 'tool error', threading.Event())
                 self.assertEqual(directive, 'Verify the real path.')
-                self.assertEqual(captured[1][2], 'Bearer test-key')
-                self.assertNotIn('password: secret', json.dumps(captured[1][1]))
-                self.assertIsNone(captured[0][2])
+                self.assertEqual(captured[0][2], 'Bearer test-key')
+                self.assertNotIn('password: secret', json.dumps(captured[0][1]))
+                self.assertEqual(len(captured), 1, 'Local inference must not send HTTP requests')
+                self.assertEqual(worker.messages[0]['content'], 'Hello')
+                self.assertIn('tool', worker.schema['properties'])
         finally:
             server.shutdown()
             server.server_close()

@@ -1,46 +1,35 @@
-# Glitch 1.0.2 for Windows x64
+# Glitch 1.1.0 - Built-in local models
 
-## Product identity and documentation
+## Run without a model server
 
-- Repository and download links now point to `gr00t-iam/Glitch`.
-- New user-facing README and first-run guide explain project assistance, local reasoning, optional cloud audits, approvals, persistent context and private Discord control.
-- Retained web and Electron prototypes are explicitly labeled as development references, not features of the shipped executable.
-- Rebranded prototype UI, prompts, metadata, package names, launchers and supporting documentation.
-- Kept native conversations and encrypted keys unchanged; preserved prototype browser database and credential compatibility.
-- Added repository branding and prototype credential regression checks.
+- Bundles llama.cpp CPU inference through llama-cpp-python. Ollama and LM Studio are no longer required.
+- Model Manager downloads public Hugging Face GGUF files with byte progress, cancellation, integrity checks and optional publisher SHA256.
+- Import, select, load, unload and delete local GGUF files inside the desktop UI.
+- Configure context size, CPU threads, temperature and an optional compatible LLaVA 1.5 projector.
+- Persistent isolated inference process protects the dashboard from model crashes. Stop interrupts generation; reload the model to continue.
+- Preserves conversations, verified tool evidence, persistent corrections, approval gates and owner-locked Discord access.
 
-## Startup repair
+## Supervisor choices
 
-Fixes the executable failing before the dashboard opens when Windows has `OLLAMA_HOST=0.0.0.0`.
+- Developer API mode supports OpenRouter, OpenAI, other OpenAI-compatible providers and Anthropic's native Messages API.
+- Authorized account-bridge mode connects to a loopback OpenAI-compatible endpoint, opens its own sign-in page and lists models. Optional bridge access keys use Windows DPAPI independently from cloud API keys.
+- No spoofed OAuth identity, browser-cookie extraction or consumer subscription-token collection. A separately configured, provider-authorized bridge is required. Glitch does not bundle a universal subscription proxy.
+- ChatGPT plan access depends on supported integration and entitlement. Claude Pro/Max credentials are not a third-party API authentication option; use Anthropic API keys. Subscription and API billing are not interchangeable.
 
-- Converts bare host names, host/port pairs and IPv6 addresses into valid client URLs.
-- Converts wildcard bind addresses into reachable loopback addresses without changing your environment.
-- Keeps the app available when optional environment settings are invalid, with a safe in-app warning.
-- Preserves saved settings, conversations and encrypted credentials.
-- Removes misleading WebView2 advice from unrelated startup errors.
-- Adds environment-import coverage to the frozen desktop test and three startup regression tests.
-- Fixes the .NET `BrowserProcessId` exception when closing an already-disposed WebView2 control; cleanup is guarded and idempotent.
+## Launch
 
-A standalone Python/PyWebView desktop agent with a robotic owl companion. No npm, Node.js or Python installation is required to run the executable.
+Download `Glitch.exe` and double-click. In **Settings & connections > Model Manager**, download or import a trusted instruction-tuned GGUF, select it and click **Load model**. Choose a project and send a task.
 
-- Local Ollama worker and conditional OpenAI-compatible cloud supervision.
-- Persistent conversations, verified tool evidence and correction anchors.
-- Workspace selection, live execution timeline, approved file diffs and streamed command output.
-- Windows-encrypted credentials and owner-locked private-channel/DM Discord control.
-- Discord task updates, approval buttons and approved screenshot attachments.
-- Approved native mouse/keyboard input, screenshots, and isolated Chrome control on localhost port 9222.
-- Fixed command recipes, traversal checks, cancellation, approval expiration and desktop input fail-safe.
-
-## Download and launch
-
-Download `Glitch.exe`, then double-click it. Install the Ollama Windows app and a downloaded model. Microsoft Edge WebView2 Runtime is required; Chrome is required for browser automation. Open Settings to configure the worker, optional cloud supervisor and Discord bot.
-
-The complete setup and build instructions are in `glitch/README.md`. `glitch/Glitch.spec` is the exact one-file PyInstaller specification. Windows builds are unsigned and may trigger SmartScreen.
+Model weights are not included. CPU inference is the portable default; GPU acceleration is not promised. Windows 10/11 x64, WebView2 and .NET 4.8 are required. Chrome and project toolchains are separate. Builds are unsigned and may show SmartScreen warnings.
 
 ## Verification
 
-27 Python regression tests cover repository branding, documentation links, startup settings, WebView2 shutdown, persistent memory, DPAPI encryption, denial/cancellation gates, path boundaries, actual PowerShell output, HTTP provider transport and simulated Discord owner-only execution with approvals. All 46 retained web prototype tests pass, including a credential compatibility regression test.
+- 37 regression tests: 36 passed and one Windows symlink-permission test skipped locally. Includes actual PowerShell output, DPAPI round trips, memory/anchor persistence, approval denials, downloader integrity/cancellation, API transport and simulated owner-locked Discord.
+- Real Hugging Face GGUF download verified against SHA256.
+- Source and frozen inference checks load real GGUF weights, generate schema-constrained JSON without an HTTP server, then unload the child process. A tiny test model verifies packaging, not autonomous task quality.
+- Real WebView2 UI checks cover library controls, supervisor mode switching, Discord settings, navigation protection, approval-gated file writes, persistence, layout and disposed-control shutdown.
+- Windows CI also builds the executable and verifies frozen inference with the checksum-pinned GGUF fixture.
 
-The desktop smoke test now imports the machine environment before initializing the real WebView2 UI, testing settings, external navigation blocking, a blocked/approved write, persistent tool evidence and layout bounds. The previous version's Chrome navigation, CSS input/clicks, text retrieval and screenshots were tested against an isolated local test page.
+Live Discord, paid API and subscription-bridge account checks require your credentials and were not validated against live accounts. Screenshot reasoning requires a compatible vision model/projector and was not validated with downloaded vision weights.
 
-Live Ollama, paid cloud and authenticated Discord account behavior require user configuration and were not exercised with live credentials. The HTTP worker and Discord task tests use fixtures. Native input is approval-gated; automated tests do not type into unrelated applications.
+See `glitch/README.md` for the complete setup, environment variables, safety boundaries, source structure and exact PyInstaller commands.
