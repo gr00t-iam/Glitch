@@ -39,6 +39,8 @@ def main():
     if os.name != 'nt':
         raise RuntimeError('Glitch Desktop currently targets Windows 10/11.')
     import webview
+    from glitch.desktop_runtime import install_webview_cleanup_guard
+    install_webview_cleanup_guard()
     from glitch.api import DesktopAPI
     from glitch.engine import AgentEngine
     from glitch.models import ModelClient

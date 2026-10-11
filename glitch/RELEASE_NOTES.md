@@ -10,6 +10,7 @@ Fixes the executable failing before the dashboard opens when Windows has `OLLAMA
 - Preserves saved settings, conversations and encrypted credentials.
 - Removes misleading WebView2 advice from unrelated startup errors.
 - Adds environment-import coverage to the frozen desktop test and three startup regression tests.
+- Fixes the .NET `BrowserProcessId` exception when closing an already-disposed WebView2 control; cleanup is guarded and idempotent.
 
 A standalone Python/PyWebView desktop agent with a robotic owl companion. No npm, Node.js or Python installation is required to run the executable.
 
@@ -29,7 +30,7 @@ The complete setup and build instructions are in `glitch/README.md`. `glitch/Gli
 
 ## Verification
 
-21 regression tests passed locally, including startup settings, persistent memory, DPAPI encryption, denial/cancellation gates, path boundaries, actual PowerShell output, HTTP provider transport and simulated Discord owner-only execution with approvals.
+24 regression tests cover startup settings, WebView2 shutdown, persistent memory, DPAPI encryption, denial/cancellation gates, path boundaries, actual PowerShell output, HTTP provider transport and simulated Discord owner-only execution with approvals.
 
 The desktop smoke test now imports the machine environment before initializing the real WebView2 UI, testing settings, external navigation blocking, a blocked/approved write, persistent tool evidence and layout bounds. The previous version's Chrome navigation, CSS input/clicks, text retrieval and screenshots were tested against an isolated local test page.
 

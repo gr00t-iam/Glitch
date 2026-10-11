@@ -11,6 +11,8 @@ from pathlib import Path
 
 def run(output_directory):
     import webview
+    from glitch.desktop_runtime import install_webview_cleanup_guard
+    install_webview_cleanup_guard()
     from glitch.api import DesktopAPI
     from glitch.engine import AgentEngine
     from glitch.models import ModelClient
@@ -110,6 +112,9 @@ def run(output_directory):
             finally:
                 engine.stop()
                 (output / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
+                # Reproduce a disposed control before FormClosed cleanup.
+                from System import Action
+                window.native.Invoke(Action(lambda: window.native.webview.Dispose()))
                 window.destroy()
 
         probed = threading.Event()
@@ -119,6 +124,8 @@ def run(output_directory):
                 threading.Thread(target=probe, daemon=True).start()
         window.events.loaded += loaded
         webview.start(gui='edgechromium', private_mode=True, debug=False)
+        result['checks'].append('Disposed WebView2 closes without a framework exception')
+        (output / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
     server.shutdown()
     server.server_close()
     return result
