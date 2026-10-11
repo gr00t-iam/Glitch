@@ -191,9 +191,10 @@ $('supervisor-provider').onchange = () => {
 function renderLibrary(models, force=false) {
   const signature = JSON.stringify(models);
   if (!force && signature === librarySignature) return;
+  const initialized = librarySignature !== '';
   librarySignature = signature;
   for (const [id, blank, key] of [['worker-model','Choose a local model','worker_model'],['vision-projector','Text / browser DOM only','vision_projector']]) {
-    const selected = $(id).value || state.settings[key] || '';
+    const selected = initialized ? $(id).value : state.settings[key] || '';
     $(id).replaceChildren(); const empty=document.createElement('option');empty.value='';empty.textContent=blank;$(id).append(empty);
     models.filter(model => id !== 'vision-projector' || model.name !== $('worker-model').value).forEach(model=>{const option=document.createElement('option');option.value=model.name;option.textContent=`${model.name} · ${(model.size/1024**3).toFixed(2)} GB`;$(id).append(option);});
     if (selected && !models.some(model=>model.name===selected)) {const unavailable=document.createElement('option');unavailable.value=selected;unavailable.textContent=selected+' (not in library)';$(id).append(unavailable);}
@@ -219,15 +220,15 @@ async function refreshModels(force=false) {
     if (inference.phase==='error') toast(inference.message,true);
     modelPhase=inference.phase;
   }
-  $('worker-model').onchange = () => {
-    if (librarySignature) renderLibrary(JSON.parse(librarySignature), true);
-  };
   if (transfer.phase!==transferPhase) {
     if (transfer.phase==='complete') toast('Model saved to your local library');
     if (transfer.phase==='error') toast(transfer.message,true);
     transferPhase=transfer.phase;
   }
 }
+$('worker-model').onchange = () => {
+  if (librarySignature) renderLibrary(JSON.parse(librarySignature), true);
+};
 function action(id, handler) {$(id).onclick=async()=>{const button=$(id);button.disabled=true;try{await handler();}catch(e){toast(e.message,true);}finally{button.disabled=false;}};}
 action('discover',()=>refreshModels(true));
 action('download-model',async()=>{await call('download_model',$('download-url').value.trim(),$('download-sha').value.trim());await refreshModels();});

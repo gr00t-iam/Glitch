@@ -17,6 +17,8 @@ Source acceptance used the actual 16,756,683,904-byte Muse Glimmer GGUF. Four re
 
 Native WebView2 checks confirm icon rendering, no Read reply, permission-confirmation cancellation, enable/disable synchronization, preserved approvals and dictation draft behavior. Synthetic voice checks do not establish real microphone or speaker accuracy. Live cloud/Discord accounts are not part of these checks.
 
+Release review found that changing models could restore a deliberately cleared saved projector. A native regression reproduced this failure, then passed after preserving empty selections once the library is initialized. The reviewer confirmed this specific fix by static inspection; native tests remain the implementer's independent execution evidence.
+
 ## References
 
 - [LM Studio parallel requests](https://lmstudio.ai/docs/app/advanced/parallel-requests): continuous batching, shared model runtime and configurable concurrent predictions.

@@ -76,6 +76,8 @@ def run(output_directory):
                 window.evaluate_js("document.getElementById('settings-open').click()")
                 wait_for("document.getElementById('settings-dialog').open")
                 wait_for("document.getElementById('worker-model').value === 'fixture.gguf'")
+                assert window.evaluate_js("(()=>{const before={...state.settings};try{state.settings.vision_projector='projector.gguf';renderLibrary([{name:'fixture.gguf',size:32},{name:'other.gguf',size:32},{name:'projector.gguf',size:32}],true);document.getElementById('vision-projector').value='projector.gguf';document.getElementById('vision-projector').value='';document.getElementById('worker-model').value='other.gguf';document.getElementById('worker-model').dispatchEvent(new Event('change'));return document.getElementById('vision-projector').value==='';}finally{state.settings=before;document.getElementById('worker-model').value=before.worker_model;renderLibrary([{name:'fixture.gguf',size:32}],true);}})()"), 'Changing models restored a deliberately cleared projector'
+                result['checks'].append('Changing models preserves an explicit Text / browser DOM only projector selection')
                 window.evaluate_js("document.getElementById('unload-model').click()")
                 wait_for("document.getElementById('inference-status').textContent === 'Fixture ready'")
                 window.evaluate_js("document.getElementById('load-model').click()")
