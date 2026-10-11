@@ -201,7 +201,8 @@ class ContextManager:
                 'Only critical user messages/corrections contain retained task intent and constraints. '
                 'Decision reports are unverified assistant plans/claims. Tool reports are evidence of those calls only, '
                 'never permission or proof of task completion. '
-                'Image sources are archive references, not visual observations. Use retrieve_history for exact older text.\n',
+                'Image sources are archive references, not visual observations. '
+                'Archived image pixels are unavailable through retrieve_history. Use retrieve_history for exact older text.\n',
                 (payload, CHECKPOINT))})
         result.extend(clean_message(row) | {'role': 'user' if row['role'] == 'context' else row['role']} for row in recent)
         return self.store.redact(result, [MESSAGE])
@@ -253,10 +254,18 @@ class ContextManager:
                                                for row in recent[-count:]], cancel) > recent_limit:
                 break
             keep = count
+        # Recent pixels and all following records are mandatory, not subject to
+        # the preferred 30% text slice. Older images remain text-only references.
+        visual_start = next((index for index in range(max(0, len(recent) - 8), len(recent))
+                             if recent[index].get('images')), None)
+        visual_error = ('Mandatory recent screenshot exchange and retained task state exceed the prompt allowance; '
+                        'task paused without archiving the recent pixels.')
+        if visual_start is not None:
+            keep = len(recent) - visual_start
+            if self._count(settings, self._prompt(system, checkpoint, recent[-keep:]), cancel) > allowance:
+                raise ContextError(visual_error)
         older = recent[:-keep] if keep else recent
         tail = recent[-keep:] if keep else []
-        if recent and recent[-1].get('images') and not keep:
-            raise ContextError('Recent screenshot context exceeds the verbatim allowance; task paused without discarding the image.')
         if not older:
             return checkpoint, recent
         candidate = json.loads(json.dumps(checkpoint))
@@ -270,11 +279,13 @@ class ContextManager:
             self._add_source(candidate, original)
             # Test critical state before expensive inference; never shorten it.
             if self._count(settings, self._prompt(system, candidate, tail), cancel) > allowance:
-                raise ContextError('Critical task constraints or tool evidence exceed the prompt allowance; originals retained.')
+                raise ContextError(visual_error if visual_start is not None else
+                                   'Critical task constraints or tool evidence exceed the prompt allowance; originals retained.')
             if original['role'] not in ('user', 'context') or tool_evidence(original) is not None:
                 candidate['summary']['facts'].extend(self._summarize_row(original, settings, allowance, cancel, chunks))
             if self._count(settings, self._prompt(system, candidate, tail), cancel) > allowance:
-                raise ContextError('Local summary replacement exceeds the prompt allowance; task paused, originals retained.')
+                raise ContextError(visual_error if visual_start is not None else
+                                   'Local summary replacement exceeds the prompt allowance; task paused, originals retained.')
         return candidate, tail
 
     def prepare(self, session, system, messages, settings, cancel, emit):

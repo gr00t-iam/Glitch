@@ -215,7 +215,8 @@ class Store:
 
     def visible_messages(self, session):
         watermark = self.session(session)['chat_watermark']
-        return [m for m in self.messages(session) if m['id'] > watermark and m['role'] != 'context']
+        return [m for m in self.messages(session) if m['id'] > watermark and m['role'] != 'context'
+                and (m['role'] != 'assistant' or m['content'])]
 
     def visible_events(self, session, after):
         record = self.session(session)

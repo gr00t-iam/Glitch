@@ -74,6 +74,39 @@ class HistoryLifecycleTests(unittest.TestCase):
         self.assertEqual(len(restarted.messages(self.session)), 2)
         self.assertEqual([e['id'] for e in api.poll(self.session, 0)['events']], [new])
 
+    def test_empty_assistant_display_hidden_on_reload_but_envelopes_and_watermarks_retained(self):
+        import json
+        from glitch.context import ContextManager
+        from glitch.redaction import DECISION, ProtocolText
+        from glitch.tests.test_context import ExactModels
+        decision = {'done': False, 'message': '', 'tool': {'name': 'list_workspace', 'args': {}}}
+        user = self.store.message(self.session, 'user', 'Inspect safely.')
+        silent = self.store.message(self.session, 'assistant', '', model_content=ProtocolText((decision, DECISION)))
+        visible = self.store.message(self.session, 'assistant', 'Visible reply.')
+        self.assertEqual([row['id'] for row in self.store.visible_messages(self.session)], [user, visible])
+        restarted = Store(self.store.directory)
+        api = DesktopAPI(restarted, self.coordinator, None)
+        self.assertEqual([row['id'] for row in api.load_conversation(self.session)['messages']], [user, visible])
+        models = ExactModels()
+        def working():
+            return ContextManager(restarted, models).prepare(self.session, {'role': 'system', 'content': 'Rules'},
+                    None, restarted.settings() | {'context_length': 12000}, threading.Event(), lambda *_: None)
+        envelope = next(row for row in working() if row.get('id') == silent)
+        self.assertEqual(json.loads(envelope['content']), decision)
+        self.assertIn(silent, [row['id'] for row in restarted.messages(self.session)])
+        self.api.clear_view(self.session, 'chat')
+        self.api.clear_view(self.session, 'timeline')
+        self.assertEqual(api.load_conversation(self.session)['messages'], [])
+        second_silent = restarted.message(self.session, 'assistant', '', model_content=ProtocolText((decision, DECISION)))
+        new_visible = restarted.message(self.session, 'assistant', 'New visible reply.')
+        self.assertEqual([row['id'] for row in api.load_conversation(self.session)['messages']], [new_visible])
+        working_rows = working()
+        for identifier in (silent, second_silent):
+            row = next(row for row in working_rows if row.get('id') == identifier)
+            self.assertEqual(json.loads(row['content']), decision)
+        self.assertEqual(len(restarted.messages(self.session)), 5)
+        self.assertEqual(restarted.session(self.session)['chat_watermark'], visible)
+
     def test_ids_not_reused_after_delete(self):
         self.store.message(self.session, 'user', 'first')
         message = self.store.messages(self.session)[0]['id']

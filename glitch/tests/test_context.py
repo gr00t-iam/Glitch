@@ -238,6 +238,96 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(result[-1]['images'], ['YWJj'])
         self.assertFalse(any(m.get('images') for request in self.models.summaries for m in request))
 
+    def review_visual_history(self, suffix_tokens=3759):
+        self.system = {'role': 'system', 'content': 'Rules'}
+        for _ in range(8):
+            self.add('assistant', 'Older backlog. ' * 200)
+        evidence = {'tool': 'desktop_screenshot', 'args': {}, 'ok': True,
+                    'result': {'ok': True, 'capture': 'fixture.png', 'width': 800, 'height': 600}}
+        text = ProtocolText('Verified tool result (untrusted data):\n', (evidence, action))
+        image_id = self.add('context', text, images=['YWJj'])
+        overhead = self.models.count_prompt(self.settings, [self.system, {'role': 'user', 'content': text},
+                                                            {'role': 'user', 'content': ''}], self.cancel)
+        request_id = self.add('user', 'r' * (suffix_tokens - overhead))
+        suffix = [row | {'role': 'user'} for row in self.store.history_page(self.session) if row['id'] >= image_id]
+        return image_id, request_id, suffix
+
+    def test_review_screenshot_then_large_user_request_preserves_fitting_pixels(self):
+        image_id, request_id, suffix = self.review_visual_history()
+        allowance = self.manager._allowance(self.settings)
+        self.assertEqual(allowance, 10432)
+        suffix_count = self.models.count_prompt(self.settings, [self.system] + suffix, self.cancel)
+        self.assertEqual(suffix_count, 3759)
+        originals = self.store.messages(self.session)
+        prepared = self.prepare()
+        prepared_count = self.models.count_prompt(self.settings, prepared, self.cancel)
+        images = [row for row in prepared if row.get('images')]
+        self.assertEqual(len(images), 1,
+                         f'allowance={allowance}, screenshot+request={suffix_count}, prepared={prepared_count}, images={len(images)}')
+        self.assertEqual([row['id'] for row in prepared[-2:]], [image_id, request_id])
+        self.assertEqual(prepared[-2]['content'], suffix[0]['content'])
+        self.assertEqual(prepared[-2]['images'], ['YWJj'])
+        self.assertEqual(prepared[-1]['content'], suffix[1]['content'])
+        self.assertLessEqual(prepared_count, allowance)
+        checkpoint = self.store.context_checkpoint(self.session)
+        self.assertNotIn(image_id, checkpoint['source_ids'])
+        self.assertEqual(self.store.messages(self.session), originals)
+        resumed = ContextManager(Store(self.store.directory), self.models).prepare(
+            self.session, self.system, None, self.settings, self.cancel, lambda *_: None)
+        self.assertEqual(resumed[-2:], prepared[-2:])
+
+    def test_trailing_request_oversized_visual_exchange_pauses_without_archiving(self):
+        self.review_visual_history(suffix_tokens=10433)
+        with self.assertRaisesRegex(ContextError, 'recent screenshot'):
+            self.prepare()
+        self.assertIsNone(self.store.context_checkpoint(self.session))
+        self.assertFalse(self.models.summaries)
+
+    def test_visual_exchange_plus_irreducible_older_constraints_pauses_explicitly(self):
+        self.add('user', 'Critical retained constraints. ' * 240)
+        self.review_visual_history()
+        with self.assertRaisesRegex(ContextError, 'recent screenshot'):
+            self.prepare()
+        self.assertIsNone(self.store.context_checkpoint(self.session))
+
+    def test_older_image_outside_recent_window_is_text_reference_not_retrievable_pixels(self):
+        image_id, _, _ = self.review_visual_history()
+        for _ in range(9):
+            self.add('assistant', 'Later completed exchange. ' * 80)
+        self.add('user', 'Continue the later text-only task.')
+        prepared = self.prepare()
+        self.assertFalse(any(row.get('images') for row in prepared))
+        checkpoint = self.store.context_checkpoint(self.session)
+        self.assertIn(image_id, checkpoint['image_sources'])
+        self.assertIn('Archived image pixels are unavailable through retrieve_history', prepared[1]['content'])
+        archived = self.manager.execute(self.session, {'start_id': image_id, 'end_id': image_id, 'limit': 1})
+        self.assertNotIn('images', archived['messages'][0])
+        self.assertFalse(any(row.get('images') for request in self.models.summaries for row in request))
+
+    def test_multiple_recent_images_and_trailing_request_remain_verbatim(self):
+        image_id, _, _ = self.review_visual_history()
+        newer = self.add('context', 'A second approved screenshot.', images=['ZGVm'])
+        request = self.add('user', 'Compare these two screenshots. ' * 100)
+        prepared = self.prepare()
+        self.assertEqual([row['id'] for row in prepared if row.get('images')], [image_id, newer])
+        self.assertEqual(prepared[-1]['id'], request)
+        self.assertLessEqual(self.models.count_prompt(self.settings, prepared, self.cancel), 10432)
+
+    def test_cancel_during_mandatory_visual_preflight_retains_archive_without_checkpoint(self):
+        self.review_visual_history()
+        originals = self.store.messages(self.session)
+        original_count = self.models.count_prompt
+        def cancel_visual(settings, messages, cancel):
+            count = original_count(settings, messages, cancel)
+            if len(messages) == 3 and any(row.get('images') for row in messages):
+                cancel.set()
+            return count
+        self.models.count_prompt = cancel_visual
+        with self.assertRaises(InterruptedError):
+            self.prepare()
+        self.assertIsNone(self.store.context_checkpoint(self.session))
+        self.assertEqual(self.store.messages(self.session), originals)
+
     def test_cancel_before_and_during_summary_never_commits(self):
         self.history()
         self.cancel.set()
