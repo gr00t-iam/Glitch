@@ -1,0 +1,33 @@
+{
+  "updatedAt": "2026-07-03T19:50:27.343Z",
+  "reason": "sub-agent running",
+  "liveAgents": [
+    {
+      "id": "terminal-sandbox",
+      "name": "Terminal Execution Sandbox Agent",
+      "specialization": "Shell safety and process monitoring",
+      "status": "Running",
+      "contextLimit": 8192,
+      "currentTask": "Validating command safety and watching process output...",
+      "sharedPayload": "Terminal Execution Sandbox Agent is online and writing task notes to nexus-subagents/shared-workspace.json."
+    },
+    {
+      "id": "codebase-refactor",
+      "name": "Codebase Refactoring Agent",
+      "specialization": "Refactoring and diff synthesis",
+      "status": "Running",
+      "contextLimit": 16384,
+      "currentTask": "Extracting code patterns and preparing diff notes...",
+      "sharedPayload": "Codebase Refactoring Agent is online and writing task notes to nexus-subagents/shared-workspace.json."
+    },
+    {
+      "id": "web-research-crawler",
+      "name": "Web API & Deep Research Crawler Agent",
+      "specialization": "Documentation crawling and endpoint mapping",
+      "status": "Running",
+      "contextLimit": 12288,
+      "currentTask": "Crawling documentation links and mapping API endpoints...",
+      "sharedPayload": "Web API & Deep Research Crawler Agent is online and writing task notes to nexus-subagents/shared-workspace.json."
+    }
+  ]
+}

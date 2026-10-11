@@ -1,0 +1,128 @@
+.build-status-panel {
+  border: 1px solid #262c3a;
+  border-radius: 10px;
+  background: #0c1118;
+  color: #e6e9ef;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.build-status-input {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #1b2130;
+}
+
+.build-status-input input {
+  flex: 1;
+  background: #131a26;
+  border: 1px solid #26304a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #e6e9ef;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.build-status-input button {
+  background: #3b6ef6;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.build-status-input button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.build-status-input button.ghost {
+  background: transparent;
+  border: 1px solid #26304a;
+  color: #9aa4b8;
+}
+
+.build-status-body {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  max-height: 340px;
+}
+
+.build-status-log {
+  overflow-y: auto;
+  padding: 10px;
+  border-right: 1px solid #1b2130;
+}
+
+.log-line {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  line-height: 1.5;
+}
+
+.log-icon {
+  opacity: 0.7;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.log-status .log-message { color: #9aa4b8; }
+.log-tool_call .log-message { color: #6fb1ff; }
+.log-tool_result .log-message { color: #7fd8a0; }
+.log-file_changed .log-message { color: #f6c453; }
+.log-done .log-message { color: #7fd8a0; font-weight: 600; }
+.log-error .log-message { color: #ff6b6b; font-weight: 600; }
+.muted { color: #5a6478; }
+
+.pulsing { animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { visibility: hidden; } }
+
+.build-status-sidebar {
+  padding: 10px;
+  overflow-y: auto;
+}
+
+.sidebar-section { margin-bottom: 16px; }
+.sidebar-section h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; color: #6b7690; letter-spacing: 0.06em; }
+.sidebar-section ul { list-style: none; margin: 0; padding: 0; }
+.sidebar-section li { padding: 3px 0; font-size: 12px; color: #c7cede; word-break: break-all; }
+
+.snapshot-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.snapshot-meta {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  color: #9aa4b8;
+}
+
+.snapshot-instruction {
+  color: #c7cede;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.revert-button {
+  background: #2a1620;
+  border: 1px solid #6b2b3c;
+  color: #ff9aa8;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.revert-button:hover { background: #3a1a26; }

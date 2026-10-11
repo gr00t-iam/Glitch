@@ -1,0 +1,26 @@
+:root {
+  --focus-color: #8ee6d1;
+  --surface-elevated: #131519;
+}
+
+/* WCAG-oriented focus ring: visible for keyboard users and offset from component borders. */
+:focus-visible {
+  outline: 3px solid var(--focus-color);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+body {
+  color: var(--text);
+}
+

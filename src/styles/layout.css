@@ -1,0 +1,359 @@
+:root {
+  --workspace-desktop-width: 70%;
+  --left-sidebar-default: 280px;
+  --left-sidebar-collapsed: 64px;
+  --status-success: var(--accent);
+  --status-warning: var(--warning);
+  --status-danger: var(--danger);
+}
+
+.workspace-layout {
+  display: grid;
+  grid-template-columns: var(--left-sidebar-default) minmax(0, var(--workspace-desktop-width)) minmax(280px, 1fr);
+  min-height: 100vh;
+}
+
+.workspace-layout-main,
+.center-panel {
+  background: var(--surface-elevated, #131519);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+}
+
+.app-shell.power-mode {
+  grid-template-columns:
+    var(--left-sidebar-width, var(--left-sidebar-default))
+    var(--left-sidebar-resizer-width, 4px)
+    minmax(320px, 1fr)
+    var(--right-sidebar-resizer-width, 4px)
+    var(--right-sidebar-width, 420px);
+  justify-content: stretch;
+}
+
+.center-panel {
+  /* The conversation is the only flexible row; terminal and composer stay docked. */
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  min-height: 0;
+}
+
+.workspace-conversation {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.workspace-conversation .chat-stream {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sidebar.left {
+  width: var(--left-sidebar-width, var(--left-sidebar-default));
+  max-width: var(--left-sidebar-width, var(--left-sidebar-default));
+  background: color-mix(in srgb, var(--surface) 88%, #131519);
+}
+
+.sidebar.left.icons-only {
+  width: var(--left-sidebar-collapsed);
+  max-width: var(--left-sidebar-collapsed);
+  align-items: center;
+  padding-inline: 8px;
+  overflow: hidden;
+}
+
+.sidebar.left.icons-only .brand-block {
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+
+.sidebar.left.icons-only .brand-block h1,
+.sidebar.left.icons-only .brand-block span,
+.sidebar.left.icons-only .projects-nav,
+.sidebar.left.icons-only .grouped-sidebar {
+  display: none;
+}
+
+.sidebar.left.icons-only .sidebar-collapse-button {
+  margin-left: 0;
+}
+
+.context-action-bar {
+  position: sticky;
+  top: 8px;
+  z-index: 20;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  margin: 8px auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-raised) 86%, transparent);
+  padding: 6px;
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(10px);
+}
+
+.context-action-bar button {
+  flex: 0 1 auto;
+  min-height: 30px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.grouped-sidebar {
+  display: grid;
+  gap: 10px;
+}
+
+.collapsible-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+  overflow: hidden;
+}
+
+.collapsible-panel-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+}
+
+.collapsible-drag-handle {
+  color: var(--muted);
+  cursor: grab;
+}
+
+.collapsible-title-button {
+  justify-content: flex-start;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  font-weight: 700;
+}
+
+.collapsible-reorder-actions {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.collapsible-reorder-actions button,
+.collapsible-pin-button {
+  width: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+}
+
+.collapsible-panel-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 10px 10px;
+}
+
+.panel-title-row.compact {
+  justify-content: flex-end;
+  min-height: 0;
+}
+
+.virtualized-list {
+  max-height: var(--virtual-list-height, 420px);
+  overflow: auto;
+  contain: content;
+}
+
+.activity-log-list {
+  display: grid;
+  gap: 8px;
+}
+
+.status-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+
+.status-badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.status-badge.success .status-badge-dot {
+  background: var(--status-success);
+}
+
+.status-badge.warning .status-badge-dot {
+  background: var(--status-warning);
+}
+
+.status-badge.danger .status-badge-dot {
+  background: var(--status-danger);
+}
+
+.status-badge-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  z-index: var(--z-floating-panel);
+  display: none;
+  width: max-content;
+  max-width: 280px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text);
+  padding: 8px 10px;
+  box-shadow: var(--shadow-md);
+  white-space: normal;
+}
+
+.status-badge:hover .status-badge-tooltip,
+.status-badge:focus-within .status-badge-tooltip {
+  display: block;
+}
+
+.browser-status-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-reconnect-button {
+  min-height: 26px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+.topbar-overflow {
+  position: relative;
+}
+
+.topbar-overflow-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: var(--z-floating-panel);
+  display: grid;
+  gap: 8px;
+  min-width: 260px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+  box-shadow: var(--shadow-lg);
+}
+
+.topbar-overflow-menu > button {
+  justify-content: flex-start;
+}
+
+.contextual-tip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 14px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 74%, transparent);
+  color: var(--text-soft);
+  padding: 9px 10px;
+  font-size: 12px;
+}
+
+.contextual-tip strong {
+  color: var(--text);
+  margin-right: 6px;
+}
+
+.contextual-tip button {
+  min-height: 26px;
+  padding-inline: 8px;
+}
+
+.modal-loading {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  background: rgba(5, 8, 11, 0.68);
+  color: var(--text);
+}
+
+.terminal-dock {
+  border-top: 1px solid var(--border);
+  background: #080d12;
+}
+
+.terminal-dock.floating {
+  position: absolute;
+  right: 18px;
+  bottom: 88px;
+  z-index: var(--z-floating-panel);
+  width: min(620px, calc(100% - 36px));
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.terminal-dock-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0b1117;
+}
+
+.terminal-dock-header .terminal-toggle {
+  flex: 1 1 auto;
+}
+
+.terminal-dock-header > button:last-child {
+  min-height: 30px;
+  margin-right: 8px;
+  border-color: rgba(34, 197, 94, 0.28);
+  background: transparent;
+  color: #c8facc;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .center-panel {
+    min-width: 0;
+  }
+
+  .terminal-dock.bottom {
+    position: static;
+  }
+
+  .terminal-dock.floating {
+    position: static;
+    width: 100%;
+    border-radius: 0;
+  }
+}
+
+/* Override the desktop power-mode grid at the same specificity so hidden
+ * sidebars do not leave empty tracks on narrow screens. */
+@media (max-width: 980px) {
+  .app-shell.power-mode,
+  .app-shell.power-mode.side-panel-open {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "center";
+    justify-content: stretch;
+  }
+}

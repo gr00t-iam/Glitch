@@ -1,0 +1,30 @@
+{
+  "bind_host": "10.0.3.1",
+  "bind_port": 8787,
+  "shared_directories": {
+    "projects": {
+      "root": "/srv/ai-bridge/projects",
+      "read": true,
+      "write": true
+    },
+    "logs": {
+      "root": "/var/log/nexus-exports",
+      "read": true,
+      "write": false
+    }
+  },
+  "scripts": {
+    "restart_preview": {
+      "argv": ["/usr/local/sbin/nexus-restart-preview"],
+      "cwd_alias": "projects",
+      "timeout_seconds": 60,
+      "max_output_bytes": 262144
+    },
+    "backup_projects": {
+      "argv": ["/usr/local/sbin/nexus-backup-projects"],
+      "cwd_alias": "projects",
+      "timeout_seconds": 300,
+      "max_output_bytes": 262144
+    }
+  }
+}

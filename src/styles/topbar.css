@@ -1,0 +1,20 @@
+:root {
+  --focus-color: #8ee6d1;
+  --elevated-bg: #131519;
+}
+
+.command-bar .model-telemetry-strip {
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+.command-bar > div:first-child {
+  min-width: 170px;
+}
+
+.topbar button:focus-visible,
+.command-bar button:focus-visible {
+  outline: 3px solid var(--focus-color);
+  outline-offset: 2px;
+  box-shadow: none;
+}

@@ -1,0 +1,107 @@
+:root {
+  --focus-color: #8ee6d1;
+  --elevated-bg: #131519;
+}
+
+.live-browser-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.live-browser-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--elevated-bg);
+  padding: 4px;
+}
+
+.live-browser-controls > * {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 0 11px;
+  justify-content: center;
+  text-align: center;
+}
+
+.browser-runtime-status {
+  text-transform: capitalize;
+}
+
+.browser-runtime-status.connected {
+  color: var(--accent);
+}
+
+.browser-runtime-status.error,
+.browser-runtime-status.disconnected {
+  color: var(--danger);
+}
+
+.dry-run-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.dry-run-toggle input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.dry-run-preview {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #05080b;
+  color: var(--text-soft);
+  text-align: center;
+  padding: 20px;
+}
+
+.connection-log {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--elevated-bg);
+  padding: 8px;
+}
+
+.connection-log-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.connection-log-lines {
+  display: grid;
+  gap: 3px;
+  max-height: 140px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #060a0e;
+  padding: 8px;
+}
+
+.connection-log-lines code {
+  color: #d8f5de;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.live-browser-panel button:focus-visible,
+.live-browser-panel input:focus-visible {
+  outline: 3px solid var(--focus-color);
+  outline-offset: 2px;
+  box-shadow: none;
+}

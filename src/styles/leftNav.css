@@ -1,0 +1,432 @@
+:root {
+  --focus-color: #8ee6d1;
+  --leftnav-elevated-bg: #131519;
+}
+
+.left-nav-layout {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.left-nav-layout.collapsed {
+  justify-items: center;
+}
+
+.left-nav-section-tab {
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 30px;
+  border-color: var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-raised) 64%, transparent);
+  font-size: 12px;
+  padding: 0 11px;
+  text-align: center;
+}
+
+/* Match sidebar navigation controls to the compact workspace action pills. */
+.left-nav-layout .new-chat-btn {
+  min-height: 30px;
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 0 11px;
+}
+
+.left-nav-section-tab.active {
+  border-color: var(--accent);
+  background: var(--leftnav-elevated-bg);
+  color: var(--accent-strong);
+}
+
+.left-nav-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.left-nav-neural-indicator {
+  display: grid;
+  width: 220px;
+  height: 160px;
+  max-width: 100%;
+  max-height: 160px;
+  place-self: start center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 8px;
+  background: #000;
+}
+
+.left-nav-neural-indicator .ai-brain-visualization,
+.left-nav-neural-loading {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.left-nav-neural-indicator canvas {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.plan-section-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.plan-item-card,
+.assignees-panel,
+.activity-cluster,
+.agent-card,
+.leftnav-cost-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--leftnav-elevated-bg);
+  padding: 10px;
+}
+
+.resource-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.context-badge,
+.token-velocity-badge {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--leftnav-elevated-bg);
+  color: var(--text-soft);
+  padding: 8px;
+  font-size: 12px;
+}
+
+.token-velocity-badge {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.context-badge strong,
+.token-velocity-badge strong {
+  color: var(--accent-strong);
+}
+
+.resource-panel [role="status"]:focus-visible,
+.resource-panel [role="region"]:focus-visible {
+  outline: 3px solid var(--focus-color);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.plan-item-card {
+  display: grid;
+  gap: 9px;
+}
+
+.plan-item-card header,
+.plan-item-card footer,
+.plan-item-meta,
+.agent-card header,
+.agent-actions,
+.activity-log-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plan-item-card h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.plan-item-card span,
+.plan-item-meta,
+.plan-soft-lock,
+.agent-card p,
+.agent-card span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.plan-status,
+.agent-status-dot {
+  border-radius: 999px;
+}
+
+.plan-status {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.plan-status.done {
+  color: var(--accent);
+}
+
+.plan-status.rejected {
+  color: var(--danger);
+}
+
+.plan-progress,
+.leftnav-cost-card .token-meter {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.plan-progress div,
+.leftnav-cost-card .token-meter div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--warning));
+}
+
+.plan-steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.assignees-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.assignees-panel header {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.assignees-panel button {
+  justify-content: flex-start;
+  min-height: 30px;
+}
+
+.assignees-panel button.active {
+  border-color: var(--accent);
+}
+
+.assignee-avatar {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+
+.activity-log-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-log-controls {
+  display: grid;
+  gap: 6px;
+}
+
+.activity-log-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.activity-log-results {
+  display: grid;
+  gap: 8px;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.activity-cluster {
+  display: grid;
+  gap: 6px;
+}
+
+.activity-cluster > button {
+  justify-content: flex-start;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.activity-cluster-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.activity-cluster-row.error {
+  color: #ffb4ba;
+}
+
+.activity-cluster-row.warning {
+  color: #ffe1a0;
+}
+
+.thread-row-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.thread-row-main small,
+.thread-row-main span {
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.session-list:not(.virtualized-list),
+.session-list:not(.virtualized-list) > div,
+.session-list:not(.virtualized-list) .session-row {
+  min-height: max-content;
+  height: auto;
+}
+
+.session-list:not(.virtualized-list) .session-row {
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.thread-model-badge {
+  width: fit-content;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--accent-strong);
+  font-size: 11px;
+}
+
+.thread-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.thread-row-actions button {
+  min-height: 24px;
+  padding-inline: 6px;
+  font-size: 11px;
+}
+
+.agent-rail {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-rail.collapsed {
+  justify-items: center;
+}
+
+.agent-rail.collapsed button {
+  position: relative;
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
+}
+
+.agent-rail-list {
+  display: grid;
+  gap: 4px;
+}
+
+.agent-rail-list button {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.agent-rail-list button.active {
+  border-color: var(--accent);
+}
+
+.agent-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--muted);
+}
+
+.agent-status-dot.running {
+  background: var(--accent);
+}
+
+.agent-status-dot.pending {
+  background: var(--warning);
+}
+
+.agent-more {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.agent-card {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-slider {
+  display: grid;
+  gap: 4px;
+}
+
+.agent-log-preview {
+  display: grid;
+  gap: 3px;
+  max-height: 92px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #060a0e;
+  padding: 7px;
+}
+
+.agent-log-preview code {
+  color: #d8f5de;
+  font-size: 11px;
+}
+
+.leftnav-undo-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  padding: 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.left-nav-layout button:focus-visible,
+.left-nav-layout input:focus-visible,
+.left-nav-layout select:focus-visible,
+.left-nav-layout [role="button"]:focus-visible {
+  outline: 3px solid var(--focus-color);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+@media (max-width: 900px) {
+  .left-nav-layout:not(.collapsed) {
+    display: none;
+  }
+}
