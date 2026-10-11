@@ -1,6 +1,7 @@
 """Durable local conversations, events, anchors and Windows-protected settings."""
 
 import ctypes
+import ipaddress
 import json
 import os
 import re
@@ -19,6 +20,34 @@ DEFAULTS = {
     'audit_interval': 5, 'max_steps': 40,
     'discord_user_id': '', 'discord_channel_id': '',
 }
+
+
+def ollama_endpoint(value: str) -> str:
+    """Convert Ollama's server bind setting to a reachable client endpoint."""
+    value = value.strip()
+    explicit_scheme = '://' in value
+    if not explicit_scheme:
+        try:
+            address = ipaddress.ip_address(value)
+            if address.version == 6:
+                value = f'[{value}]'
+        except ValueError:
+            pass
+        value = 'http://' + value
+    url = urlsplit(value)
+    host = url.hostname
+    if (url.scheme not in ('http', 'https') or not host or
+            any(char.isspace() for char in value) or
+            url.username is not None or url.password is not None or url.query or url.fragment):
+        raise ValueError('Invalid Ollama endpoint.')
+    port = url.port
+    if port is not None and port < 1:
+        raise ValueError('Invalid Ollama port.')
+    host = {'0.0.0.0': '127.0.0.1', '::': '::1'}.get(host, host)
+    authority = f'[{host}]' if ':' in host else host
+    if port is not None or not explicit_scheme:
+        authority += f':{port if port is not None else 11434}'
+    return url._replace(netloc=authority).geturl().rstrip('/')
 
 
 def protect(value: bytes, decrypt: bool = False) -> bytes:
@@ -67,6 +96,7 @@ class Store:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.path = self.directory / 'glitch.sqlite3'
         self.lock = threading.RLock()
+        self.startup_warnings = []
         with self.connect() as db:
             db.executescript('''
                 PRAGMA journal_mode=WAL;
@@ -108,9 +138,13 @@ class Store:
         if values['mode'] not in ('local', 'hybrid'):
             raise ValueError('Choose local or hybrid mode.')
         for name in ('ollama_url', 'supervisor_url'):
+            if name == 'ollama_url':
+                values[name] = ollama_endpoint(values[name])
             url = urlsplit(values[name])
             if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
                 raise ValueError('Enter an HTTP or HTTPS endpoint without credentials or query parameters.')
+            if url.port is not None and url.port < 1:
+                raise ValueError('Invalid endpoint port.')
             if name == 'supervisor_url' and url.scheme != 'https' and url.hostname not in ('localhost', '127.0.0.1', '::1'):
                 raise ValueError('Cloud supervisors must use HTTPS.')
             values[name] = values[name].rstrip('/')
@@ -152,13 +186,17 @@ class Store:
         return os.environ.get('DISCORD_TOKEN') or (protect(path.read_bytes(), decrypt=True).decode() if path.exists() else '')
 
     def import_environment(self):
-        updates = {}
+        self.startup_warnings = []
         for variable, name in [('OLLAMA_HOST', 'ollama_url'), ('DISCORD_USER_ID', 'discord_user_id'),
                                ('DISCORD_CHANNEL_ID', 'discord_channel_id')]:
             if os.environ.get(variable):
-                updates[name] = os.environ[variable]
-        if updates:
-            self.save_settings(updates)
+                try:
+                    self.save_settings({name: os.environ[variable]})
+                except (ValueError, TypeError):
+                    # Do not expose invalid values: an endpoint may contain credentials.
+                    self.startup_warnings.append(
+                        f'Ignored invalid {variable}. Your saved settings are unchanged; open Settings to configure it.')
+        return list(self.startup_warnings)
 
     def new_session(self, workspace):
         root = Path(workspace).resolve(strict=True)

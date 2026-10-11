@@ -54,7 +54,7 @@ Settings provide the normal setup path; these variables are only needed for mana
 | `DISCORD_TOKEN` | Bot token; takes precedence over the Windows-encrypted saved token. |
 | `DISCORD_USER_ID` | Sole authorized user, imported into settings at startup. |
 | `DISCORD_CHANNEL_ID` | Optional private server channel; blank restricts control to owner DMs. |
-| `OLLAMA_HOST` | Full HTTP(S) Ollama base URL, e.g. `http://127.0.0.1:11434`. |
+| `OLLAMA_HOST` | Ollama host or HTTP(S) base URL, e.g. `localhost:11434`. Wildcard server bind addresses such as `0.0.0.0` automatically connect through loopback on port 11434. Invalid optional overrides are ignored with an in-app warning; saved settings remain available. |
 | `CLOUD_SUPERVISOR_API_KEY` | OpenAI-compatible cloud key; takes precedence over the saved key. |
 
 Keys are never returned from the Python bridge, saved as plaintext settings, or inserted into model instructions. Saved credentials are encrypted using Windows DPAPI for the current Windows user. Environment-provided keys remain active until removed from the environment; clearing a saved key cannot remove an environment override. Settings and chat data live in `%LOCALAPPDATA%\Glitch`, outside the executable extraction directory.

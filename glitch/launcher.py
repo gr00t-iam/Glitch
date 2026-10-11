@@ -1,7 +1,6 @@
-from glitch.main import main
+from glitch.main import main, show_startup_error
 
 if __name__ == '__main__':
-    import ctypes
     import sys
     try:
         if len(sys.argv) == 3 and sys.argv[1] == '--smoke-test':
@@ -11,4 +10,5 @@ if __name__ == '__main__':
         else:
             main()
     except Exception as error:
-        ctypes.windll.user32.MessageBoxW(None, f'Glitch could not start.\n\n{error}\n\nCheck Microsoft Edge WebView2 Runtime is installed.', 'Glitch', 0x10)
+        show_startup_error(error)
+        sys.exit(1)

@@ -1,4 +1,15 @@
-# Glitch 1.0.0 for Windows x64
+# Glitch 1.0.1 for Windows x64
+
+## Startup repair
+
+Fixes the executable failing before the dashboard opens when Windows has `OLLAMA_HOST=0.0.0.0`.
+
+- Converts bare host names, host/port pairs and IPv6 addresses into valid client URLs.
+- Converts wildcard bind addresses into reachable loopback addresses without changing your environment.
+- Keeps the app available when optional environment settings are invalid, with a safe in-app warning.
+- Preserves saved settings, conversations and encrypted credentials.
+- Removes misleading WebView2 advice from unrelated startup errors.
+- Adds environment-import coverage to the frozen desktop test and three startup regression tests.
 
 A standalone Python/PyWebView desktop agent with a robotic owl companion. No npm, Node.js or Python installation is required to run the executable.
 
@@ -18,8 +29,8 @@ The complete setup and build instructions are in `glitch/README.md`. `glitch/Gli
 
 ## Verification
 
-18 regression tests passed locally, including persistent memory, DPAPI encryption, denial/cancellation gates, path boundaries, actual PowerShell output, HTTP provider transport and simulated Discord owner-only execution with approvals.
+21 regression tests passed locally, including startup settings, persistent memory, DPAPI encryption, denial/cancellation gates, path boundaries, actual PowerShell output, HTTP provider transport and simulated Discord owner-only execution with approvals.
 
-The packaged executable passed a real WebView2 smoke test covering initialization, settings, external navigation blocking, a blocked/approved write, persistent tool evidence and layout bounds. Real Chrome navigation, CSS input/clicks, text retrieval and screenshots passed against an isolated local test page.
+The desktop smoke test now imports the machine environment before initializing the real WebView2 UI, testing settings, external navigation blocking, a blocked/approved write, persistent tool evidence and layout bounds. The previous version's Chrome navigation, CSS input/clicks, text retrieval and screenshots were tested against an isolated local test page.
 
 Live Ollama, paid cloud and authenticated Discord account behavior require user configuration and were not exercised with live credentials. The HTTP worker and Discord task tests use fixtures. Native input is approval-gated; automated tests do not type into unrelated applications.

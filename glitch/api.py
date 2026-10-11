@@ -12,7 +12,8 @@ class DesktopAPI:
 
     def bootstrap(self):
         return {'settings': self._store.settings(), 'sessions': self._store.sessions(),
-                'runtime': self._engine.state(), 'discord': self._discord.status() if self._discord else {}}
+                'runtime': self._engine.state(), 'discord': self._discord.status() if self._discord else {},
+                'startup_warnings': list(self._store.startup_warnings)}
 
     def choose_workspace(self):
         import webview

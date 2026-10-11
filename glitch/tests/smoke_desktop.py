@@ -45,6 +45,9 @@ def run(output_directory):
         project = root / 'project'
         project.mkdir()
         store = Store(root / 'data')
+        store.import_environment()
+        result['startup_endpoint'] = store.settings()['ollama_url']
+        result['checks'].append('Production environment import completes before native window initialization')
         store.save_settings({'worker_model': 'fixture', 'ollama_url': f'http://127.0.0.1:{server.server_port}'})
         session = store.new_session(str(project))
         models = ModelClient(store)

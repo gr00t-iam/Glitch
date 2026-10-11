@@ -6,6 +6,14 @@ import sys
 from pathlib import Path
 
 
+def show_startup_error(error):
+    from glitch.storage import redact
+    message = redact(str(error))
+    hint = ('\n\nInstall Microsoft Edge WebView2 Runtime and retry.'
+            if 'webview2' in message.lower() or 'edgechromium' in message.lower() else '')
+    ctypes.windll.user32.MessageBoxW(None, f'Glitch could not start.\n\n{message}{hint}', 'Glitch', 0x10)
+
+
 def install_navigation_guard(window):
     from System import Action
     if getattr(window, '_glitch_navigation_guard', False):
@@ -63,6 +71,6 @@ if __name__ == '__main__':
         main()
     except Exception as error:
         if os.name == 'nt':
-            ctypes.windll.user32.MessageBoxW(None, f'Glitch could not start.\n\n{error}\n\nInstall Microsoft Edge WebView2 Runtime if it is missing.', 'Glitch', 0x10)
+            show_startup_error(error)
         else:
             raise

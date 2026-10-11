@@ -157,7 +157,7 @@ async function poll() {
 window.addEventListener('pywebviewready', async () => {
   if (state.ready) return;
   state.ready=true;
-  try {const result=await call('bootstrap');updateSettings(result.settings);state.sessions=result.sessions;if(state.sessions.length)await selectSession(state.sessions[0].id);updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';}
+  try {const result=await call('bootstrap');updateSettings(result.settings);state.sessions=result.sessions;if(state.sessions.length)await selectSession(state.sessions[0].id);updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';for(const warning of result.startup_warnings || [])toast(warning,true);}
   catch(e){toast(e.message,true);}
   setInterval(poll,600);
 });
