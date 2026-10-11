@@ -8,6 +8,8 @@ import uuid
 from glitch.monitor import TriggerMonitor
 from glitch.tools import TOOL_SCHEMAS, WorkspaceTools
 from glitch.computer import COMPUTER_SCHEMAS, ComputerTools
+from glitch.service_tools import SERVICE_SCHEMAS, ServiceTools
+from glitch.resources import SHARED_RESOURCES
 from glitch.redaction import MESSAGE, DECISION, RESULT, action as action_schema, event_payload, tool_name, ProtocolText, DESCRIPTOR
 
 
@@ -108,13 +110,17 @@ class AgentEngine:
         try:
             settings = self.store.settings()
             workspace = self.store.session(session)['workspace']
+            resources = self.coordinator.resources if self.coordinator else SHARED_RESOURCES
             def approve(action, payload):
                 allowed = self._approve(action, payload)
-                if allowed and self.coordinator:
-                    self.coordinator.resources.acquire(action, workspace, self.cancelled)
+                if allowed:
+                    resources.acquire(action, workspace, self.cancelled)
                 return allowed
             tools = WorkspaceTools(workspace, approve, self._emit, self.cancelled)
             computer = ComputerTools(self.store.directory, approve, self._emit, self.cancelled)
+            service = ServiceTools(self.store.vault, self._approve, self._emit, self.cancelled)
+            service.chrome = computer.chrome
+            service.resources = resources
             extra = []
             if self.coordinator and not self.parent_id:
                 from glitch.orchestration import DELEGATION_SCHEMAS
@@ -127,7 +133,7 @@ class AgentEngine:
                     'Return JSON with message (short update or final answer), done (boolean), tool (null when done, otherwise {name,args}). '
                     'Do not claim completion until you have verified the requested change. '
                     'Desktop screenshots use primary-screen native pixels; use a vision-capable model for visual tasks. '
-                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + extra))
+                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + SERVICE_SCHEMAS + extra))
             def system():
                 parts = [base]
                 if self.coordinator:
@@ -169,15 +175,21 @@ class AgentEngine:
                     if tool['name'] in {t['name'] for t in extra}:
                         result = self.coordinator.delegate(self.run_id, tool['name'], tool['args'], self.cancelled)
                     else:
-                        executor = computer if tool['name'] in {t['name'] for t in COMPUTER_SCHEMAS} else tools
+                        if tool['name'] in {t['name'] for t in SERVICE_SCHEMAS}:
+                            executor = service
+                        elif tool['name'] in {t['name'] for t in COMPUTER_SCHEMAS}:
+                            executor = computer
+                        elif tool['name'] in {t['name'] for t in TOOL_SCHEMAS}:
+                            executor = tools
+                        else:
+                            raise ValueError('Unknown tool. No action was executed.')
                         result = executor.execute(tool['name'], tool['args'])
                 except InterruptedError:
                     raise
                 except Exception as error:
                     result = {'ok': False, 'error': str(error)}
                 finally:
-                    if self.coordinator:
-                        self.coordinator.resources.release()
+                    resources.release()
                 image = result.pop('_image', None)
                 result = self.store.redact(result, RESULT)
                 action = {'tool': tool['name'], 'args': tool['args'], 'ok': result.get('ok') is True, 'result': result}

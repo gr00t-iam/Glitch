@@ -142,6 +142,76 @@ class ChromeController:
         finally:
             connection.close()
 
+    def fill_credential(self, args, origin, resolve):
+        """Check the live top frame, then guard and fill in one synchronous JS turn."""
+        import websocket
+        from glitch.vault import canonical_origin
+        if self.cancel.is_set():
+            raise InterruptedError('Stopped.')
+        pages = self.ensure()
+        page = next((p for p in pages if p['id'] == args['tab_id']), None)
+        if page is None:
+            raise ValueError('The requested browser tab no longer exists.')
+        endpoint = page['webSocketDebuggerUrl']
+        parsed = urlsplit(endpoint)
+        if (parsed.scheme != 'ws' or parsed.hostname not in ('127.0.0.1', 'localhost') or
+                parsed.port != 9222 or parsed.username is not None or parsed.password is not None):
+            raise ValueError('Invalid Chrome session endpoint.')
+        connection = websocket.create_connection(endpoint, timeout=2, suppress_origin=True, http_proxy_host=None)
+        counter = 0
+
+        def call(method, params=None):
+            nonlocal counter
+            if self.cancel.is_set():
+                raise InterruptedError('Stopped.')
+            counter += 1
+            connection.send(json.dumps({'id': counter, 'method': method, 'params': params or {}}))
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if self.cancel.is_set():
+                    raise InterruptedError('Stopped.')
+                response = json.loads(connection.recv())
+                if response.get('id') == counter:
+                    if 'error' in response:
+                        raise ValueError('Credential fill failed in Chrome.')
+                    return response.get('result', {})
+            raise TimeoutError('Chrome did not respond.')
+
+        try:
+            frame = call('Page.getFrameTree')['frameTree']['frame']
+            actual = urlsplit(frame['url'])
+            if canonical_origin(actual.scheme + '://' + actual.netloc) != origin:
+                raise ValueError('Credential is not authorized for the current browser origin.')
+            payload = resolve()
+            # Set both fields before dispatching page handlers. Navigation to another
+            # document between CDP calls is stopped by the in-expression origin guard.
+            expression = '''(()=>{
+                if(location.origin!==ORIGIN)throw Error("Origin changed");
+                const u=document.querySelector(USER_SELECTOR),p=document.querySelector(PASS_SELECTOR);
+                if(!u||!p||u===p||!(u instanceof HTMLInputElement)||
+                   !(p instanceof HTMLInputElement)||p.type!=="password")throw Error("Input missing");
+                const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set;
+                set.call(u,USER_VALUE);set.call(p,PASS_VALUE);
+                for(const e of [u,p]){e.dispatchEvent(new Event("input",{bubbles:true}));
+                                     e.dispatchEvent(new Event("change",{bubbles:true}));}
+                return true;
+            })()'''
+            replacements = {'ORIGIN': origin, 'USER_SELECTOR': args['username_selector'],
+                            'PASS_SELECTOR': args['password_selector'],
+                            'USER_VALUE': payload['username'], 'PASS_VALUE': payload['password']}
+            # Replace markers in one pass; credential text is never parsed as a marker.
+            import re
+            expression = re.sub(r'ORIGIN|USER_SELECTOR|PASS_SELECTOR|USER_VALUE|PASS_VALUE',
+                                lambda match: json.dumps(replacements[match[0]]), expression)
+            result = call('Runtime.evaluate', {'expression': expression, 'returnByValue': True})
+            if self.cancel.is_set():
+                raise InterruptedError('Stopped.')
+            if result.get('exceptionDetails') or result.get('result', {}).get('value') is not True:
+                raise ValueError('Credential fill failed: origin changed or inputs inaccessible.')
+            return {'ok': True, 'fields': ['username', 'password']}
+        finally:
+            connection.close()
+
 
 class ComputerTools:
     def __init__(self, directory, approve, emit, cancel):

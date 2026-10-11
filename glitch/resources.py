@@ -1,6 +1,7 @@
 """Cancellation-aware shared desktop/workspace ownership after approval."""
 import os
 import threading
+from contextlib import contextmanager
 
 
 class ResourceCoordinator:
@@ -27,3 +28,14 @@ class ResourceCoordinator:
         if lock:
             self.local.held = None
             lock.release()
+
+    @contextmanager
+    def lease(self, action, workspace, cancel):
+        self.acquire(action, workspace, cancel)
+        try:
+            yield
+        finally:
+            self.release()
+
+
+SHARED_RESOURCES = ResourceCoordinator()

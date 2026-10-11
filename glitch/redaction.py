@@ -54,7 +54,8 @@ def tool_schema(name):
     from glitch.tools import TOOL_SCHEMAS
     from glitch.computer import COMPUTER_SCHEMAS
     from glitch.orchestration import DELEGATION_SCHEMAS
-    return next((item['parameters'] for item in TOOL_SCHEMAS + COMPUTER_SCHEMAS + DELEGATION_SCHEMAS
+    from glitch.service_tools import SERVICE_SCHEMAS
+    return next((item['parameters'] for item in TOOL_SCHEMAS + COMPUTER_SCHEMAS + DELEGATION_SCHEMAS + SERVICE_SCHEMAS
                  if item['name'] == name), {})
 
 
@@ -65,6 +66,10 @@ def arguments(name):
     if name == 'await_subagent':
         result['run_id'] = OPAQUE
     if name == 'browser_action':
+        result['tab_id'] = OPAQUE
+    if name in ('service_request', 'browser_fill_credential'):
+        result['credential_id'] = OPAQUE
+    if name == 'browser_fill_credential':
         result['tab_id'] = OPAQUE
     return result
 
@@ -91,6 +96,7 @@ RESULT = fields('ok', 'error', 'denied', 'content', 'value', 'output', 'diff', '
                 capture=OPAQUE, run_id=OPAQUE, session=OPAQUE, status=RUN_STATUS,
                 result=None, entries=[fields('name', 'size', type=enum('file', 'directory'))],
                 tabs=[fields('title', 'url', id=OPAQUE)])
+RESULT.update(fields('status_code', connections=[DESCRIPTOR], fields=[enum('username', 'password')]))
 
 
 def action(value):
