@@ -127,8 +127,9 @@ class WorkspaceTools:
         digest = hashlib.sha256(data).hexdigest()
         if len(data) > 1_000_000 or digest != expected_hash:
             raise ValueError('Artifact readback differs from the successful write: ' + target)
+        text = data.decode('utf-8')
         return {'ok': True, 'path': target, 'absolute_path': str(path), 'bytes': len(data),
-                'sha256': digest, 'content': data[:120000].decode('utf-8'), 'truncated': len(data) > 120000}
+                'sha256': digest, 'content': text[:120000], 'truncated': len(text) > 120000}
 
     def command(self, recipe):
         if recipe not in RECIPES:

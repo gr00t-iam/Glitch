@@ -108,7 +108,6 @@ class AgentEngine:
 
     def _run(self, session, prompt):
         actions = []
-        artifacts = ArtifactEvidence(prompt)
         unsupported = 0
         try:
             settings = self.store.settings()
@@ -146,7 +145,8 @@ class AgentEngine:
                           (self.store.anchors(session), [None])]
                 return {'role': 'system', 'content': ProtocolText(*parts)}
             messages = [system()] + [m | {'role': 'user'} if m['role'] == 'context' else m for m in self.store.messages(session)]
-            self._emit('started', 'Glitch is processing locally...', {'model': settings['worker_model'], 'workspace': workspace})
+            started = self._emit('started', 'Glitch is processing locally...', {'model': settings['worker_model'], 'workspace': workspace})
+            artifacts = ArtifactEvidence(prompt, self._events_before(session, started))
             for step in range(1, settings['max_steps'] + 1):
                 if self.cancelled.is_set():
                     raise InterruptedError('Stopped by you.')
@@ -248,6 +248,20 @@ class AgentEngine:
                 self.running_session = None
                 self.pending = None
                 self.approval_event.set()
+
+    def _events_before(self, session, boundary):
+        after = 0
+        while True:
+            if self.cancelled.is_set():
+                raise InterruptedError('Stopped by you.')
+            page = self.store.events(session, after)
+            if not page:
+                return
+            for event in page:
+                if event['id'] >= boundary:
+                    return
+                yield event
+            after = page[-1]['id']
 
     def _audit(self, settings, prompt, actions, trigger):
         self._emit('supervisor', 'Glitch is consulting the cloud supervisor to refresh memory', {'reason': trigger})

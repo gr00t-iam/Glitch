@@ -150,6 +150,100 @@ class CompletionTests(unittest.TestCase):
         self.assertTrue(worker.reviews)
         self.assertIn(self.store.anchors(self.session)[0], worker.contexts[1][0]['content'])
 
+    def test_verified_historical_reference_needs_no_new_tool_or_rewrite(self):
+        self.run_worker([write(), done()])
+        path = self.workspace / 'wiki.html'
+        original = path.read_bytes(), path.stat().st_mtime_ns
+        cursor = self.store.events(self.session, 0)[-1]['id']
+        self.store = Store(self.root / 'data')
+        worker, _ = self.run_worker([done('We created wiki.html yesterday.')] * 4,
+                                    prompt='What did we create yesterday?')
+        events = self.store.events(self.session, cursor)
+        self.assertTrue(any(e['kind'] == 'completed' for e in events))
+        self.assertEqual(len(worker.contexts), 1)
+        self.assertFalse(any(e['kind'] in ('tool', 'result', 'approval') for e in events))
+        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), original)
+        self.assertEqual(self.store.messages(self.session)[-1]['content'], 'We created wiki.html yesterday.')
+
+    def test_unverified_nonexistent_historical_claim_is_not_blessed(self):
+        self.store.message(self.session, 'assistant', 'We created wiki.html yesterday.')
+        _, events = self.run_worker([done('We created wiki.html yesterday.')] * 4,
+                                    prompt='What did we create yesterday?')
+        self.assertFalse(any(e['kind'] == 'completed' for e in events))
+        self.assertFalse((self.workspace / 'wiki.html').exists())
+
+    def test_existing_file_and_old_assistant_claim_are_not_historical_proof(self):
+        (self.workspace / 'wiki.html').write_text('unverified', encoding='utf-8')
+        self.store.message(self.session, 'assistant', 'We created wiki.html yesterday.')
+        _, events = self.run_worker([done('We created wiki.html yesterday.')] * 4,
+                                    prompt='What did we create yesterday?')
+        self.assertFalse(any(e['kind'] == 'completed' for e in events))
+
+    def test_prior_verified_write_does_not_bless_current_fake_claim(self):
+        self.run_worker([write(), done()])
+        cursor = self.store.events(self.session, 0)[-1]['id']
+        self.run_worker([done()] * 4)
+        self.assertFalse(any(e['kind'] == 'completed' for e in self.store.events(self.session, cursor)))
+
+    def test_historical_reference_requires_evidence_for_each_named_file(self):
+        self.run_worker([write(), done()])
+        cursor = self.store.events(self.session, 0)[-1]['id']
+        self.run_worker([done('We created absent.html yesterday.')] * 4,
+                        prompt='What did we create yesterday?')
+        self.assertFalse(any(e['kind'] == 'completed' for e in self.store.events(self.session, cursor)))
+
+    def test_other_conversation_write_is_not_historical_proof(self):
+        self.run_worker([write(), done()])
+        self.session = self.store.new_session(str(self.workspace))
+        _, events = self.run_worker([done('We created wiki.html yesterday.')] * 4,
+                                    prompt='What did we create yesterday?')
+        self.assertFalse(any(e['kind'] == 'completed' for e in events))
+
+    def test_historical_question_does_not_bless_new_execution_claim(self):
+        self.run_worker([write(), done()])
+        cursor = self.store.events(self.session, 0)[-1]['id']
+        self.run_worker([done('We created wiki.html now.')] * 4,
+                        prompt='What did we create yesterday?')
+        self.assertFalse(any(e['kind'] == 'completed' for e in self.store.events(self.session, cursor)))
+
+    def test_current_write_cannot_substantiate_unverified_past_creation(self):
+        _, events = self.run_worker([write(), done('We created wiki.html yesterday.'),
+                                    done('We created wiki.html yesterday.'), done('We created wiki.html yesterday.')],
+                                    prompt='What did we create yesterday?')
+        self.assertFalse(any(e['kind'] == 'completed' for e in events))
+
+    def test_unfinished_prior_write_is_not_historical_proof(self):
+        self.store.save_settings({'max_steps': 1})
+        self.run_worker([write()])
+        cursor = self.store.events(self.session, 0)[-1]['id']
+        self.store.save_settings({'max_steps': 4})
+        self.run_worker([done('We created wiki.html yesterday.')] * 4,
+                        prompt='What did we create yesterday?')
+        self.assertFalse(any(e['kind'] == 'completed' for e in self.store.events(self.session, cursor)))
+
+    def test_historical_proof_can_follow_first_event_page(self):
+        for step in range(305):
+            self.store.event(self.session, 'local', 'Synthetic earlier step', {'step': step})
+        self.run_worker([write(), done()])
+        worker, _ = self.run_worker([done('We created wiki.html yesterday.')],
+                                    prompt='What did we create yesterday?')
+        self.assertEqual(len(worker.contexts), 1)
+        self.assertEqual(self.store.messages(self.session)[-1]['content'], 'We created wiki.html yesterday.')
+
+    def test_utf8_crossing_preview_byte_boundary_can_complete(self):
+        content = 'a' * 119999 + chr(0xe9) + 'tail'
+        decision = write()
+        decision['tool']['args']['content'] = content
+        _, events = self.run_worker([decision, done(), done(), done()])
+        self.assertTrue(any(e['kind'] == 'completed' for e in events))
+        proof = next(e['payload']['result'] for e in events
+                     if e['kind'] == 'result' and e['title'] == 'read_file')
+        self.assertEqual(proof['bytes'], 120005)
+        self.assertEqual(proof['sha256'], hashlib.sha256(content.encode('utf-8')).hexdigest())
+        self.assertEqual(proof['content'], content[:120000])
+        self.assertTrue(proof['truncated'])
+        self.assertEqual((self.workspace / 'wiki.html').read_bytes(), content.encode('utf-8'))
+
 
 class SupervisorReliabilityTests(unittest.TestCase):
     def setUp(self):
