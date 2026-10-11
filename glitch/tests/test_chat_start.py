@@ -20,7 +20,7 @@ class ChatStartTests(unittest.TestCase):
             api = DesktopAPI(store, engine, Mock())
             session = api.new_conversation(None)
             self.assertTrue(Path(session['workspace']).is_dir())
-            self.assertEqual(Path(session['workspace']).parent, store.directory / 'workspaces')
+            self.assertEqual(Path(session['workspace']).parent, (store.directory / 'workspaces').resolve())
             following = api.new_conversation(session['id'])
             self.assertEqual(following['workspace'], session['workspace'])
             self.assertNotEqual(following['id'], session['id'])

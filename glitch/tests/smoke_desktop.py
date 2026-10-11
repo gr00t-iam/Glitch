@@ -91,7 +91,7 @@ def run(output_directory):
                 wait_for("document.getElementById('approval-dialog').open")
                 session = store.sessions()[0]['id']
                 project = Path(store.session(session)['workspace'])
-                assert project.parent == store.directory / 'workspaces'
+                assert project.parent == (store.directory / 'workspaces').resolve()
                 assert models.worker.loaded
                 result['checks'].append('First message creates a managed chat workspace and auto-loads the selected local model')
                 assert not (project / 'note.txt').exists()
