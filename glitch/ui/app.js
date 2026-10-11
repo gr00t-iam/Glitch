@@ -1,6 +1,6 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
-const state = {session: null, cursor: 0, settings: {}, sessions: [], pending: null, running: null, lastRun: null, count: 0, ready: false, polling: false};
+const state = {session: null, cursor: 0, settings: {}, sessions: [], pending: null, running: null, lastRun: null, count: 0, ready: false, polling: false, submitting: false};
 let librarySignature = '', modelPhase = '', transferPhase = '';
 function toast(text, error = false) {
   const node = document.createElement('div'); node.className = 'toast' + (error ? ' error' : ''); node.textContent = text;
@@ -47,15 +47,16 @@ function addEvent(event, live = false) {
   if (live) $('events').scrollTop = $('events').scrollHeight;
 }
 function renderSessions() {
+  const workspaceName = path => {const parts=path.split(/[\\/]/);return parts.at(-2)==='workspaces'&&parts.at(-1).startsWith('Chat-')?'Chat workspace':parts.at(-1);};
   $('sessions').replaceChildren();
   state.sessions.forEach(session => {
     const node = document.createElement('button'); node.className = 'session' + (state.session === session.id ? ' active' : '');
     const title = document.createElement('strong'); title.textContent = session.title;
-    const path = document.createElement('small'); path.textContent = session.workspace.split(/[\\/]/).pop(); node.append(title, path);
+    const path = document.createElement('small'); path.textContent = workspaceName(session.workspace); node.append(title, path);
     node.title = session.workspace; node.onclick = () => selectSession(session.id).catch(e => toast(e.message, true)); $('sessions').append(node);
   });
   const active = state.sessions.find(s => s.id === state.session);
-  $('project').textContent = active?.workspace.split(/[\\/]/).pop() || 'Choose a project folder';
+  $('project').textContent = active ? workspaceName(active.workspace) : 'Choose a project folder';
   $('project').title = active?.workspace || ''; $('workspace-path').textContent = active?.workspace || 'Choose where Glitch should work';
 }
 async function selectSession(identifier) {
@@ -75,9 +76,10 @@ async function selectSession(identifier) {
 }
 function updateRuntime(runtime) {
   state.running = runtime.running_session;
-  $('stop').disabled = !state.running; $('send').disabled = !!state.running || !state.session;
-  $('choose').disabled = !!state.running; $('new').disabled = !!state.running;
-  $('prompt').disabled = !!state.running;
+  const busy = !!state.running || state.submitting;
+  $('stop').disabled = !state.running; $('send').disabled = busy || !state.ready;
+  $('choose').disabled = busy; $('new').disabled = busy;
+  $('prompt').disabled = busy;
   const pending = runtime.approval;
   if (pending && state.pending?.id !== pending.id) {
     state.pending = pending; $('approval-title').textContent = pending.action;
@@ -122,7 +124,7 @@ async function choose() {
   state.sessions.unshift(session); await selectSession(session.id); toast('Project selected');
 }
 $('choose').onclick = () => choose().catch(e => toast(e.message, true)); $('project').onclick = $('choose').onclick;
-$('new').onclick = async () => {try {if (!state.session) return await choose(); const session = await call('new_conversation', state.session); state.sessions.unshift(session); await selectSession(session.id); status('Glitch is ready');} catch(e){toast(e.message,true);}};
+$('new').onclick = async () => {try {const session = await call('new_conversation', state.session); state.sessions.unshift(session); await selectSession(session.id); status('Glitch is ready');} catch(e){toast(e.message,true);}};
 $('settings-open').onclick = () => {populateSettings(); $('settings-dialog').showModal();};
 $('settings-close').onclick = () => {$('settings-dialog').close(); $('supervisor-key').value=''; $('discord-token').value='';};
 $('settings-dialog').addEventListener('close', () => {$('supervisor-key').value=''; $('discord-token').value=''; $('proxy-token').value='';});
@@ -167,6 +169,8 @@ async function refreshModels(force=false) {
   $('load-model').disabled=!!state.running||['loading','generating'].includes(inference.phase);
   $('unload-model').disabled=!!state.running||inference.phase==='unloaded';$('delete-model').disabled=!!state.running;
   if (inference.phase !== modelPhase) {
+    if (inference.phase==='loading') status('Glitch is loading your local model...', 'local');
+    if (inference.phase==='generating') status('Glitch is processing locally...', 'local');
     if (inference.phase==='ready' && modelPhase==='loading') toast('Local model is ready');
     if (inference.phase==='error') toast(inference.message,true);
     modelPhase=inference.phase;
@@ -189,8 +193,13 @@ action('test-supervisor',async()=>{await saveSettings();$('supervisor-result').t
 action('proxy-login',async()=>{await saveSettings();const result=await call('open_proxy_login');toast(result.message);});
 $('connect-discord').onclick = async () => {try {await saveSettings();const result=await call('connect_discord');$('discord-detail').textContent=result.message;} catch(e){toast(e.message,true);}};
 $('disconnect-discord').onclick = async () => {try {const result=await call('disconnect_discord');$('discord-detail').textContent=result.message;} catch(e){toast(e.message,true);}};
-$('composer').onsubmit = async e => {e.preventDefault(); const prompt=$('prompt').value.trim(); if (!prompt || !state.session || state.running) return;
-  $('send').disabled=true; try {await call('send',state.session,prompt);addMessage('user',prompt);$('prompt').value='';state.running=state.session;} catch(error){toast(error.message,true);$('send').disabled=false;}
+$('composer').onsubmit = async e => {e.preventDefault(); const prompt=$('prompt').value.trim(); if (!prompt || state.running || state.submitting) return;
+  state.submitting=true; updateRuntime({running_session:state.running,approval:state.pending});
+  try {
+    if (!state.session) {const session=await call('new_conversation',null);state.sessions.unshift(session);await selectSession(session.id);}
+    await call('send',state.session,prompt);addMessage('user',prompt);$('prompt').value='';state.running=state.session;
+  } catch(error){toast(error.message,true);}
+  finally {state.submitting=false;updateRuntime({running_session:state.running,approval:state.pending});}
 };
 $('prompt').addEventListener('keydown', e => {if (e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('composer').requestSubmit();}});
 $('stop').onclick = () => call('stop').then(() => status('Stopping Glitch safely...')).catch(e => toast(e.message,true));

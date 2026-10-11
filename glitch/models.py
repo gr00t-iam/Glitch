@@ -53,8 +53,16 @@ class ModelClient:
     def chat(self, settings, messages, cancel):
         if cancel.is_set():
             raise InterruptedError('Stopped.')
-        if self.worker.status()['name'] != settings['worker_model']:
-            raise ValueError('Load the selected GGUF model in Model Manager before starting a task.')
+        # Model Manager may already be loading. Wait on the agent thread, never the UI bridge.
+        while self._load_thread and self._load_thread.is_alive():
+            if cancel.wait(0.1):
+                self._cancel_load.set()
+                raise InterruptedError('Stopped while loading the local model.')
+        state = self.worker.status()
+        if state['name'] != settings['worker_model'] or state['phase'] != 'ready':
+            path = self.library.path(settings['worker_model'])
+            projector = self.library.path(settings['vision_projector']) if settings['vision_projector'] else None
+            self.worker.load(path, settings, cancel, projector)
         return self.worker.chat(messages, DECISION_SCHEMA, cancel)
 
     def review(self, settings, task, actions, reason, cancel):

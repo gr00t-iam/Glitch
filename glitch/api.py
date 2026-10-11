@@ -25,10 +25,16 @@ class DesktopAPI:
             return None
         return self._store.session(self._store.new_session(selected[0]))
 
-    def new_conversation(self, session):
+    def new_conversation(self, session=None):
         if self._engine.state()['running_session']:
             raise ValueError('Stop the active task first.')
-        return self._store.session(self._store.new_session(self._store.session(session)['workspace']))
+        if session:
+            workspace = self._store.session(session)['workspace']
+        else:
+            import uuid
+            workspace = self._store.directory / 'workspaces' / ('Chat-' + uuid.uuid4().hex[:12])
+            workspace.mkdir(parents=True, exist_ok=False)
+        return self._store.session(self._store.new_session(workspace))
 
     def load_conversation(self, session):
         self._store.session(session)

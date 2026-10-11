@@ -30,7 +30,6 @@ def run(output_directory):
         store.import_environment()
         result['checks'].append('Production environment import completes before native window initialization')
         store.save_settings({'worker_model': 'fixture.gguf'})
-        session = store.new_session(str(project))
         class FixtureWorker:
             loaded = True
             def status(self):
@@ -63,7 +62,8 @@ def run(output_directory):
         def probe():
             try:
                 wait_for("document.getElementById('model-label').textContent === 'fixture.gguf'")
-                wait_for("document.querySelectorAll('.session').length === 1")
+                wait_for("document.querySelectorAll('.session').length === 0 && !document.getElementById('send').disabled")
+                result['checks'].append('Send is enabled on a fresh install without a project or conversation')
                 result['checks'].append('Bundled UI and native bridge initialized')
                 install_navigation_guard(window)
                 window.evaluate_js("location.href='https://example.invalid/'")
@@ -86,8 +86,14 @@ def run(output_directory):
                 wait_for("!document.getElementById('settings-discord').hidden")
                 window.evaluate_js("document.getElementById('settings-close').click()")
                 result['checks'].append('Settings dialog and Discord tab work')
+                models.worker.close()
                 window.evaluate_js("document.getElementById('prompt').value='Create a note';document.getElementById('composer').requestSubmit()")
                 wait_for("document.getElementById('approval-dialog').open")
+                session = store.sessions()[0]['id']
+                project = Path(store.session(session)['workspace'])
+                assert project.parent == store.directory / 'workspaces'
+                assert models.worker.loaded
+                result['checks'].append('First message creates a managed chat workspace and auto-loads the selected local model')
                 assert not (project / 'note.txt').exists()
                 result['checks'].append('File write blocks before approval')
                 window.evaluate_js("document.getElementById('approve').click()")

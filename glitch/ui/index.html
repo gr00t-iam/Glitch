@@ -20,8 +20,8 @@
     <header class="topbar"><div><h1>Workspace</h1><span id="workspace-path" class="muted">Choose where Glitch should work</span></div><div class="top-actions"><span id="mode" class="pill">Local only</span><button id="stop" disabled>Stop task</button></div></header>
     <div class="companion" id="companion"><img src="owl.svg" alt=""><div><strong id="status">Glitch is ready</strong><span id="status-detail">Local reasoning. Verified actions. A watchful companion.</span></div><span class="status-dot"></span></div>
     <div class="workspace">
-      <section class="conversation"><div id="messages" class="messages" aria-live="polite"><div id="welcome" class="welcome"><img src="owl.svg" alt="Glitch"><h2>A little owl. A careful co-pilot.</h2><p>Choose a project, pick your local model, and give Glitch a task.</p></div></div>
-        <form id="composer"><label class="sr-only" for="prompt">Message Glitch</label><textarea id="prompt" rows="3" placeholder="Ask Glitch to inspect, build, or fix something..."></textarea><div class="composer-footer"><span id="model-label" class="muted">No local model selected</span><button id="send" class="primary" type="submit">Send task</button></div></form>
+      <section class="conversation"><div id="messages" class="messages" aria-live="polite"><div id="welcome" class="welcome"><img src="owl.svg" alt="Glitch"><h2>A little owl. A careful co-pilot.</h2><p>Pick your local model and say hello. Choose a project folder when you want Glitch to work on existing files.</p></div></div>
+        <form id="composer"><label class="sr-only" for="prompt">Message Glitch</label><textarea id="prompt" rows="3" placeholder="Ask Glitch a question, or give it a task..."></textarea><div class="composer-footer"><span id="model-label" class="muted">No local model selected</span><button id="send" class="primary" type="submit" disabled>Send task</button></div></form>
       </section>
       <aside class="timeline"><div class="section-heading"><h2>Execution timeline</h2><span id="event-count" class="pill">0</span></div><div id="events"><p class="empty">Verified actions and command output appear here.</p></div></aside>
     </div>

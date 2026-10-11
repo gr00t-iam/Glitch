@@ -7,7 +7,7 @@ Glitch is a Windows desktop AI companion. Give it a task in plain language, watc
 1. Get **Glitch.exe** from [the latest release](https://github.com/gr00t-iam/Glitch/releases/latest).
 2. Ensure Microsoft Edge WebView2 Runtime is installed. No Ollama or LM Studio is needed.
 3. Double-click **Glitch.exe**. There is no terminal or development server to keep open.
-4. Use **Projects +** to select a trusted folder.
+4. Optionally use **Projects +** to select a trusted folder for existing project files. Ordinary chat works without choosing a folder; Glitch creates a chat workspace automatically.
 5. Open **Settings & connections > Model Manager**. Paste a public Hugging Face URL ending in `.gguf`, click **Download model**, then select the downloaded file and click **Load model**. You can also **Import GGUF file** from your PC. Keep **Supervision > Execution mode** on **Worker only** for local use.
 6. Ask Glitch to inspect your project. Review the timeline and any approval request.
 

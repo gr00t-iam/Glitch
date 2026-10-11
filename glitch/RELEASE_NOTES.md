@@ -1,4 +1,14 @@
-# Glitch 1.1.0 - Built-in local models
+# Glitch 1.1.1 - Chat without setup blockers
+
+- Fixes the disabled Send button when no project/conversation has been selected.
+- First message automatically creates a persistent conversation with an isolated chat workspace. Project selection is optional for ordinary chat.
+- New conversation no longer opens a mandatory folder picker on a fresh install.
+- Saved local models load automatically on the first message, including after restart or canceled inference. No supervisor/API key is required in worker-only mode.
+- Loading status is visible; double submissions remain blocked, and all existing approval gates remain on.
+- Adds three regression tests and a native fresh-install UI test for this exact failure.
+- Fix verification: 40 tests, 39 passed and one symlink-permission test skipped locally. Real WebView2 confirms Send works with zero conversations, creates a workspace, auto-loads the saved model and still blocks file writes for approval. The user's 30B model was not loaded during testing; UI tests use deterministic model decisions.
+
+## Glitch 1.1.0 - Built-in local models
 
 ## Run without a model server
 

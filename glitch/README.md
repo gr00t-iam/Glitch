@@ -9,7 +9,7 @@ A standalone Python/PyWebView agent with a robotic owl companion, embedded GGUF 
 3. Double-click `Glitch.exe`. Use **Projects +** to select a trusted project folder.
 4. Open **Settings & connections > Model Manager**. Paste a public Hugging Face GGUF file URL and click **Download model**, or **Import GGUF file** from your PC.
 5. Select an instruction-tuned model that fits your RAM and click **Load model**. Wait for **Ready for local tasks**.
-6. Send a task. Watch the timeline and approve exact file diffs, command recipes and computer actions before they execute.
+6. Send a task. A project folder is optional for ordinary chat: the first message creates an isolated chat workspace and conversation automatically. The saved model loads on first use if it is not already loaded. Watch the timeline and approve exact file diffs, command recipes and computer actions before they execute.
 
 Model weights are downloaded separately because of their size and licensing. Chrome, Windows WebView2 and project-specific compilers/interpreters are not bundled. Git, Python tests and .NET recipes require the corresponding tools on the host. Glitch never reports a missing tool as successfully executed.
 
