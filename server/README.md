@@ -1,4 +1,6 @@
-# NexusHarness FastAPI Agent Wrapper
+# Glitch FastAPI Agent Wrapper
+
+> Legacy development sidecar. This is not used by the supported Windows executable. See the [Glitch user guide](../README.md) to run the desktop app. Do not expose these development endpoints as a production service.
 
 This sidecar gives an agent direct filesystem access without copy-pasting large file contents into prompts.
 

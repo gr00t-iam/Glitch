@@ -1,4 +1,4 @@
-// AUTO-GENERATED skill catalog for the NexusHarness Skill Store.
+// AUTO-GENERATED skill catalog for the Glitch Skill Store.
 // 100 production-ready, safety-constrained skills across 5 categories.
 // Regenerate with scripts/genskills (see project notes). Edit entries here freely.
 import type { MarketplaceSkill } from "../components/SkillStore";

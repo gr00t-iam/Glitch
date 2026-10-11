@@ -70,7 +70,7 @@ export default function DesktopApp(): JSX.Element {
       id: "welcome",
       role: "assistant",
       content:
-        "Choose a workspace, confirm your AI backend, and describe the task. NexusHarness will run locally and ask before risky actions.",
+        "Choose a workspace, confirm your AI backend, and describe the task. Glitch will run locally and ask before risky actions.",
       timestamp: Date.now(),
     },
   ]);
@@ -146,7 +146,7 @@ export default function DesktopApp(): JSX.Element {
         {
           id: createId("system"),
           role: "system",
-          content: "Desktop runtime is not available. Run NexusHarness through the desktop shell.",
+          content: "Desktop runtime is not available. Run Glitch through the desktop shell.",
           timestamp: Date.now(),
         },
       ]);
@@ -187,9 +187,9 @@ export default function DesktopApp(): JSX.Element {
     <div className={`desktop-shell ${settings.mode === "hybrid" ? "hybrid-active" : ""}`}>
       <aside className="desktop-sidebar">
         <div className="brand-row">
-          <div className="brand-mark">NH</div>
+          <div className="brand-mark" aria-hidden="true">G</div>
           <div>
-            <strong>NexusHarness</strong>
+            <strong>Glitch</strong>
             <span>Autonomous desktop agent</span>
           </div>
         </div>
@@ -270,7 +270,7 @@ export default function DesktopApp(): JSX.Element {
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Ask NexusHarness to inspect, edit, test, or explain your workspace..."
+                placeholder="Ask Glitch to inspect, edit, test, or explain your workspace..."
                 rows={2}
               />
               <button className="send-button" disabled={isRunning || !prompt.trim()}>

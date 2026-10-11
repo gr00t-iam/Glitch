@@ -41,7 +41,7 @@ def _download_file(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(destination.suffix + ".part")
     partial.unlink(missing_ok=True)
-    request = urllib.request.Request(url, headers={"User-Agent": "NexusHarness/1.0"})
+    request = urllib.request.Request(url, headers={"User-Agent": "Glitch/1.0"})
     try:
         with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response, partial.open("wb") as output:
             shutil.copyfileobj(response, output, length=1024 * 1024)

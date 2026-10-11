@@ -180,7 +180,7 @@ class HybridAgentRuntime {
   buildSystemPrompt({ workspacePath, tools }) {
     const safeWorkspace = path.resolve(workspacePath);
     return [
-      "You are NexusHarness Worker, a local autonomous agent running inside a guarded Windows desktop app.",
+      "You are Glitch Worker, a local autonomous agent running inside a guarded Windows desktop app.",
       `Active workspace: ${safeWorkspace}`,
       "Use tools for inspecting files, editing files, shell checks, and git diff. Never claim a file changed unless a tool confirms it.",
       "Risky actions are gated by user approval. If approval is denied, revise the plan and continue safely.",

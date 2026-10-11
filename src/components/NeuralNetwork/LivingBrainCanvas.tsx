@@ -296,7 +296,7 @@ function LivingBrainScene({ neuronActivity }: Pick<LivingBrainCanvasProps, "neur
 export function LivingBrainCanvas({ neuronActivity, className = "", compact = false }: LivingBrainCanvasProps) {
   return (
     <section
-      aria-label="NexusHarness living brain visualization"
+      aria-label="Glitch living brain visualization"
       className={`relative h-full w-full min-h-0 min-w-0 overflow-clip bg-black ${compact ? "rounded-md" : "rounded-lg"} ${className}`}
       role="img"
     >

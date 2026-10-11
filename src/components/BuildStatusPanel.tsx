@@ -41,7 +41,7 @@ export function BuildStatusPanel() {
         <input
           value={instruction}
           onChange={(e) => setInstruction(e.target.value)}
-          placeholder="Ask NexusHarness to modify itself... e.g. 'Add a dark mode toggle to the navbar'"
+          placeholder="Ask Glitch to modify itself... e.g. 'Add a dark mode toggle to the navbar'"
           disabled={running}
         />
         <button type="submit" disabled={running || !instruction.trim()}>

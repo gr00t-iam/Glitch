@@ -14,7 +14,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     backgroundColor: "#0c1118",
-    title: "NexusHarness",
+    title: "Glitch",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -51,7 +51,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle("workspace:select", async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: "Choose a NexusHarness workspace",
+      title: "Choose a Glitch workspace",
       properties: ["openDirectory", "createDirectory"],
     });
     if (result.canceled || result.filePaths.length === 0) return null;

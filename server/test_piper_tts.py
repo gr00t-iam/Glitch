@@ -26,7 +26,7 @@ class PiperTTSTests(TestCase):
             def run_piper(argv, **kwargs):
                 output_path = Path(argv[argv.index("--output_file") + 1])
                 output_path.write_bytes(b"RIFF-local-wave")
-                self.assertEqual(kwargs["input"], b"Hello from NexusHarness")
+                self.assertEqual(kwargs["input"], b"Hello from Glitch")
                 self.assertFalse(kwargs["shell"])
                 return type("Result", (), {"returncode": 0})()
 
@@ -38,7 +38,7 @@ class PiperTTSTests(TestCase):
                 patch.object(piper_service, "LATEST_WAV", latest_wav),
                 patch.object(piper_service.subprocess, "run", side_effect=run_piper) as run,
             ):
-                audio = piper_service.generate_piper_speech("Hello from NexusHarness")
+                audio = piper_service.generate_piper_speech("Hello from Glitch")
 
             self.assertEqual(audio, b"RIFF-local-wave")
             self.assertEqual(latest_wav.read_bytes(), b"RIFF-local-wave")

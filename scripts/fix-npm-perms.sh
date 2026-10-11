@@ -2,7 +2,7 @@
 set -u
 
 cat <<'EOF'
-NexusHarness npm repair guide
+Glitch npm repair guide
 
 This script does not mutate your system. It prints safe repair steps.
 

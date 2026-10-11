@@ -1,6 +1,6 @@
 {
-  "name": "NexusHarness",
-  "short_name": "NexusHarness",
+  "name": "Glitch",
+  "short_name": "Glitch",
   "description": "A local-first browser PWA harness for self-correcting multi-agent automation.",
   "start_url": "/",
   "scope": "/",

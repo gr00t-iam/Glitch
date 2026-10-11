@@ -87,14 +87,14 @@ export function LeftNavLayout({
 
   if (collapsed) {
     return (
-      <nav className="left-nav-layout collapsed" role="navigation" aria-label="Collapsed NexusHarness navigation">
+      <nav className="left-nav-layout collapsed" role="navigation" aria-label="Collapsed Glitch navigation">
         <AgentRail collapsed agents={subAgents} logs={runtimeLogs} onPause={onAgentPause} onResume={onAgentResume} onContextLimitChange={onAgentContextLimitChange} />
       </nav>
     );
   }
 
   return (
-    <nav className="left-nav-layout" role="navigation" aria-label="NexusHarness left navigation" onKeyDown={handleSectionKeyDown}>
+    <nav className="left-nav-layout" role="navigation" aria-label="Glitch left navigation" onKeyDown={handleSectionKeyDown}>
       {sectionLabels.map((label, index) => (
         <button
           key={label}

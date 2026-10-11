@@ -1,102 +1,63 @@
-# NexusHarness
+# Glitch
 
-## Glitch Windows Desktop App
+![Glitch the robotic owl](glitch/ui/owl.svg)
 
-The standalone Windows application is now **Glitch**, a robotic owl companion with a Python/PyWebView desktop shell, local Ollama worker, optional cloud supervisor, approved native computer and Chrome tools, and owner-locked Discord control. It runs from `Glitch.exe` with no npm, Node.js or Python installation required on the user's machine.
+**A local-first Windows AI companion that turns your instructions into visible, approval-gated work.**
 
-See [Glitch setup, architecture, Discord configuration and Windows build guide](glitch/README.md). The complete Python implementation is in `glitch/`. Double-click `Build Glitch.cmd` to build from source (Python 3.12 required for building only). GitHub Actions also produces a Windows executable artifact.
+Glitch helps you inspect a project, edit files, run supported tests, and interact with your desktop or Chrome. You choose a local model in Ollama, describe a task, and follow the work in a live execution timeline. Glitch asks before changing files, running commands, capturing screenshots, or controlling your computer.
 
-The sections below document the previous Electron/PWA application, retained for migration reference.
+An optional cloud supervisor checks the local worker for errors, repeated actions, and drift. Its corrections stay attached to the conversation so the worker can resume with a persistent anchor. The robotic owl is your status companion, not a promise that AI output is always correct.
 
-NexusHarness is a local-first UI for running local LLM harnesses and guarded autonomous agent workflows.
+## Download and start
 
-## Desktop Agent Runtime
+1. Download **Glitch.exe** from [the latest Windows release](https://github.com/gr00t-iam/Glitch/releases/latest).
+2. Install [Ollama for Windows](https://ollama.com/download/windows) and download a model. Install [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) if it is missing.
+3. Double-click **Glitch.exe**. Running the packaged app requires no Python, Node.js, npm, or terminal.
+4. Choose a trusted project folder. In **Settings & connections**, click **Find local models**, select your model, and save.
+5. Describe a task and review approval requests before allowing actions.
 
-NexusHarness now ships as a Windows desktop shell backed by Electron and the existing Vite/React UI. The browser renderer never receives raw Node.js access; local filesystem and shell work are routed through `desktop/main.cjs`, `desktop/preload.cjs`, and the guarded runtime modules under `desktop/runtime`.
+Windows 10/11 x64 is the supported desktop target. Model weights and Ollama are not bundled. Install Chrome for browser tasks and the appropriate project tools for test/build recipes. Unsigned releases may show a Windows SmartScreen warning.
 
-### Architecture
+[First-run guide](<START HERE - How to run Glitch.md>) | [Detailed setup and build guide](glitch/README.md)
 
-```text
-desktop/main.cjs
-  Creates the Windows desktop shell and owns all IPC handlers.
+## What Glitch does
 
-desktop/preload.cjs
-  Exposes a small, typed `window.nexusDesktop` API to the React renderer.
+| Capability | What you control |
+| --- | --- |
+| Project assistance | Choose a workspace; inspect files and approve proposed edits with diffs. |
+| Local reasoning | Use a downloaded Ollama model without cloud supervision. |
+| Hybrid supervision | Opt into cloud audits after errors, repeated steps, or a configurable interval. |
+| Computer and Chrome control | Approve clicks, typing, scrolling, browser navigation and screenshots. |
+| Execution timeline | See verified tool results, file changes, command output and corrections. |
+| Persistent conversations | Resume conversations and their verified evidence and correction anchors after restarting. |
+| Private Discord control | Assign tasks and approve actions remotely through a bot restricted to your User ID and optional private channel. |
 
-desktop/runtime/agentLoop.cjs
-  Runs the hybrid supervisor-worker loop. Ollama is the local worker. Hybrid mode injects cloud supervisor directives when configured.
+Try: "Inspect this project and explain how it is organized," "Run the supported tests and investigate failures," or "Draft a change to this file and show me the diff."
 
-desktop/runtime/tools.cjs
-  Provides guarded workspace tools: list files, read files, write files, PowerShell command execution, and git diff.
+## Safety and privacy
 
-desktop/runtime/triggerMonitor.cjs
-  Triggers supervisor audits on tool errors, repeated actions, and every configured number of tool steps.
+- File tools are confined to the selected workspace; sensitive paths are protected.
+- Commands use fixed recipes, not arbitrary model-generated shell strings. Tests and builds still execute project code: use trusted workspaces.
+- The cloud supervisor cannot bypass approvals or grant administrator privileges.
+- Local-only mode makes no supervisor requests. Ollama endpoints, Chrome pages and Discord can still involve network traffic.
+- Hybrid mode shares your task and up to 15 recent redacted tool records with your chosen provider. Redaction is not a guarantee that every secret is detected.
+- Discord can receive task output and explicitly approved screenshots. Glitch must remain open; native computer control needs an awake, unlocked Windows desktop.
+- Conversations live in SQLite under `%LOCALAPPDATA%\Glitch`; saved API keys and bot tokens use Windows DPAPI.
 
-desktop/runtime/supervisorBridge.cjs
-  Calls an OpenRouter-compatible chat-completions endpoint and returns a Course Correction Directive.
-```
+Glitch is not an OS sandbox, a general-purpose unrestricted shell, a corporate network bypass, or a guarantee against hallucinations. Supervision helps detect drift; users remain responsible for reviewing consequential actions.
 
-### Run Locally On Windows
+## Which code powers the application?
 
-1. Install dependencies:
+**The supported executable is the Python/PyWebView app in `glitch/`.** Its HTML interface is bundled offline; it does not run the old development web server.
 
-```powershell
-npm install
-```
+The React/Vite prototype (`src/`, `runtime/`, `server/`) and Electron prototype (`desktop/`) are retained for development reference. Features found there, including prototype stores and repository integrations, are not automatically available in `Glitch.exe`. Do not expose prototype development endpoints as a production service.
 
-2. Start Ollama and make sure the configured local model is available:
+[Architecture and maintainer handoff](<Glitch - Project Handoff Specification.md>) | [Legacy prototype guide](docs/legacy-development.md)
 
-```powershell
-ollama pull llama3
-ollama serve
-```
+## Build and contribute
 
-3. Launch NexusHarness as a desktop app:
+Developers need Python 3.12 x64 to build. Double-click **Build Glitch.cmd**, or follow the [exact build commands](glitch/README.md#build-from-source-on-windows). The tested PyInstaller spec is `glitch/Glitch.spec`.
 
-```powershell
-npm run desktop
-```
+The **Glitch Windows** GitHub workflow runs the Python tests and packages a Windows executable. Releases and Actions artifacts are distinct: an artifact is a ZIP you extract; a release provides the executable directly.
 
-The app builds the production renderer, opens the desktop shell, and lets you choose a local workspace folder from the sidebar.
-
-### Hybrid Supervisor Mode
-
-Open **Settings**, switch mode to **Hybrid supervisor**, and save an OpenRouter-compatible API key. The key is stored in Electron user data, not in browser localStorage. The supervisor checks the local worker after repeated actions, tool errors, and the configured step interval. If the supervisor detects drift, it returns a **Course Correction Directive**, which is injected into the next local worker prompt.
-
-### Safety Gates
-
-File writes and shell commands are gated by default. The desktop shell shows an approval dialog with the exact file path or PowerShell command before execution. Dangerous shell patterns such as recursive deletion, shutdown, registry deletion, disk partitioning, and formatting are blocked by local policy before approval.
-
-## UI Layout
-
-NexusHarness now centers the main workspace as the primary surface on desktop, with a 280px left sidebar that can collapse to a 64px icon rail. The workspace uses the elevated dark surface token `--surface-elevated` and a subtle shadow so chat, browser tasks, and terminal output stay visually grouped.
-
-The floating workspace action bar exposes the highest-frequency controls:
-
-- Send
-- Run Browser Task
-- Switch Brain
-- Undo Agent Action
-- Dock or undock Runtime Terminal
-
-The left sidebar is grouped into collapsible panels for Threads, Execution Plan, Activity Log, and Cost Tracker. Panel collapse, pin, and order state is stored in `localStorage` under `NEXUS_SIDEBAR_GROUP_STATE`.
-
-At widths below 900px, the sidebar collapses to the icon rail and the terminal docks under the workspace by default. The terminal can also run as a floating window on larger screens.
-
-## Keyboard And Accessibility
-
-All interactive controls use a visible keyboard focus ring:
-
-```css
-outline: 3px solid var(--focus-color);
-outline-offset: 2px;
-```
-
-Main panels are labeled with `role="region"` and `aria-label`. Browser connection changes and Activity Log updates are announced with polite live regions.
-
-Useful shortcuts:
-
-- `Enter`: send the current message when the composer is focused
-- Command palette button: opens the workspace command palette
-- Sidebar panel title buttons: collapse or expand a panel
-- Sidebar reorder buttons: move a panel up or down
+Report bugs through [GitHub Issues](https://github.com/gr00t-iam/Glitch/issues). Include your app version, the failed action, and a screenshot or error message. Never post API keys, Discord tokens, private project contents, or unreviewed screenshots.

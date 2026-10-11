@@ -1,12 +1,14 @@
 # Host Bridge for LXC Agents
 
+> Retained managed-host prototype for developers. This is not required by Glitch.exe. See the [desktop application guide](../README.md) for supported setup.
+
 Run the AI agent inside the LXC container. Run this bridge on the Proxmox host. The bridge exposes only named host directories and named scripts.
 
 ## Recommended Shape
 
 ```mermaid
 flowchart LR
-  A["AI agent in LXC"] -->|"Bearer token over vmbr/private IP"| B["Nexus host bridge"]
+  A["AI agent in LXC"] -->|"Bearer token over vmbr/private IP"| B["Glitch host bridge prototype"]
   B --> C["Directory alias: projects"]
   B --> D["Directory alias: logs"]
   B --> E["Allow-listed host scripts"]

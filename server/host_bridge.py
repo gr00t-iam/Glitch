@@ -79,7 +79,7 @@ BRIDGE_TOKEN = os.environ.get("NEXUS_HOST_BRIDGE_TOKEN", "")
 AUDIT_LOG = Path(os.environ.get("NEXUS_HOST_BRIDGE_AUDIT", "/var/log/nexus-host-bridge/audit.jsonl"))
 
 app = FastAPI(
-    title="NexusHarness Host Bridge",
+    title="Glitch Host Bridge",
     version="0.1.0",
     description="Controlled host-directory and script gateway for AI agents running inside LXC containers.",
 )

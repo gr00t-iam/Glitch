@@ -21,7 +21,7 @@ class SupervisorBridge {
 
     const endpoint = `${settings.supervisorBaseUrl.replace(/\/$/, "")}/chat/completions`;
     const supervisorPrompt = [
-      "You are NexusHarness Supervisor, an automated auditor for a local autonomous worker.",
+      "You are Glitch Supervisor, an automated auditor for a local autonomous worker.",
       "Inspect the latest trajectory for hallucination, loops, unsafe file changes, and bad shell behavior.",
       "Return only one concise Course Correction Directive that the local worker can follow next.",
       "Do not include secrets. Do not ask the user to use a terminal unless absolutely necessary.",
@@ -52,8 +52,8 @@ class SupervisorBridge {
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${apiKey}`,
-        "HTTP-Referer": "https://local.nexusharness",
-        "X-Title": "NexusHarness Desktop",
+        "HTTP-Referer": "https://local.glitch",
+        "X-Title": "Glitch Desktop",
       },
       body: JSON.stringify(body),
     });

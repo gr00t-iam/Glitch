@@ -7,5 +7,5 @@ export function isChatHistoryMemoryEnabled(): boolean {
 
 export function setChatHistoryMemoryEnabled(enabled: boolean): void {
   window.localStorage.setItem(CHAT_HISTORY_MEMORY_KEY, String(enabled));
-  window.dispatchEvent(new CustomEvent("nexusharness:memory-preference-changed", { detail: { enabled } }));
+  window.dispatchEvent(new CustomEvent("glitch:memory-preference-changed", { detail: { enabled } }));
 }

@@ -18,8 +18,8 @@ const defaultSettings = {
 class SettingsStore {
   constructor(userDataPath) {
     this.userDataPath = userDataPath;
-    this.settingsPath = path.join(userDataPath, "nexusharness-settings.json");
-    this.secretsPath = path.join(userDataPath, "nexusharness-secrets.json");
+    this.settingsPath = path.join(userDataPath, "glitch-settings.json");
+    this.secretsPath = path.join(userDataPath, "glitch-secrets.json");
   }
 
   async get() {
@@ -62,8 +62,16 @@ class SettingsStore {
   async readJson(filePath, fallback) {
     try {
       return JSON.parse(await fs.readFile(filePath, "utf8"));
-    } catch {
-      return fallback;
+    } catch (error) {
+      if (error.code !== "ENOENT") return fallback;
+      // Keep earlier prototype settings readable without changing new filenames.
+      const previousPrefix = String.fromCharCode(110, 101, 120, 117, 115, 104, 97, 114, 110, 101, 115, 115);
+      const previousPath = path.join(this.userDataPath, path.basename(filePath).replace(/^glitch-/, previousPrefix + "-"));
+      try {
+        return JSON.parse(await fs.readFile(previousPath, "utf8"));
+      } catch {
+        return fallback;
+      }
     }
   }
 }

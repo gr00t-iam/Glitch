@@ -1,6 +1,6 @@
 # Persistent Memory
 
-NexusHarness keeps long-term facts and learned lessons here.
+Glitch keeps long-term facts and learned lessons here.
 
 - My Name is: Jeremy Miller.
 - My Age is: 45. 

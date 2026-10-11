@@ -487,7 +487,7 @@ export function publishPluginRuntime(plugins: NexusPlugin[]): RegisteredPluginTo
       message: `${toolName} is registered and ready for the local agent runner.`,
     }),
   };
-  window.dispatchEvent(new CustomEvent("nexusharness:plugins-changed", { detail: { plugins, tools } }));
+  window.dispatchEvent(new CustomEvent("glitch:plugins-changed", { detail: { plugins, tools } }));
   return tools;
 }
 

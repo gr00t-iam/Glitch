@@ -146,8 +146,8 @@ export async function createGitHubBranch(workspaceRoot: string, branch: string):
 export async function commitAndPushGitHubRepo(workspaceRoot: string, input: GitHubCommitInput): Promise<GitHubActionResult> {
   const connection = await getConnectionWithToken(workspaceRoot);
   const repoPath = await requireRepoPath(workspaceRoot, connection.owner, connection.repo);
-  const commitMessage = sanitizeCommitMessage(input.message || "NexusHarness agent update");
-  const commitBody = sanitizeCommitMessage(input.body || "Changes generated and reviewed by NexusHarness.");
+  const commitMessage = sanitizeCommitMessage(input.message || "Glitch agent update");
+  const commitBody = sanitizeCommitMessage(input.body || "Changes generated and reviewed by Glitch.");
 
   await ensureGitIdentity(repoPath);
   await runGit(repoPath, ["add", "-A"]);
@@ -179,8 +179,8 @@ export async function createGitHubPullRequest(workspaceRoot: string, input: GitH
   const pr = await octokit.pulls.create({
     owner: connection.owner,
     repo: connection.repo,
-    title: input.title?.trim() || `NexusHarness update: ${currentBranch}`,
-    body: input.body?.trim() || "Automated changes prepared by NexusHarness.",
+    title: input.title?.trim() || `Glitch update: ${currentBranch}`,
+    body: input.body?.trim() || "Automated changes prepared by Glitch.",
     head: currentBranch,
     base,
   });
@@ -207,7 +207,7 @@ async function writeConnection(workspaceRoot: string, config: StoredGitHubConnec
 }
 
 function configDirectory(workspaceRoot: string): string {
-  return join(workspaceRoot, ".nexusharness");
+  return join(workspaceRoot, ".glitch");
 }
 
 function connectionPath(workspaceRoot: string): string {
@@ -252,7 +252,7 @@ function validateBranch(value: string): string {
 }
 
 function sanitizeCommitMessage(value: string): string {
-  return value.replace(/\r/g, "").trim().slice(0, 4000) || "NexusHarness agent update";
+  return value.replace(/\r/g, "").trim().slice(0, 4000) || "Glitch agent update";
 }
 
 function repoWorkspacePath(workspaceRoot: string, owner: string, repo: string): string {
@@ -303,10 +303,10 @@ async function ensureGitIdentity(repoPath: string): Promise<void> {
     runGit(repoPath, ["config", "user.email"]),
   ]);
   if (!name.stdout.trim()) {
-    await runGit(repoPath, ["config", "user.name", "NexusHarness Agent"]);
+    await runGit(repoPath, ["config", "user.name", "Glitch Agent"]);
   }
   if (!email.stdout.trim()) {
-    await runGit(repoPath, ["config", "user.email", "nexusharness-agent@users.noreply.github.com"]);
+    await runGit(repoPath, ["config", "user.email", "glitch-agent@users.noreply.github.com"]);
   }
 }
 
@@ -326,7 +326,7 @@ function runGit(cwd: string, args: string[], token?: string): Promise<{ stdout: 
 export const gitHubToolSchemas = [
   {
     name: "github_clone_repo",
-    description: "Clone the connected GitHub repository into the designated NexusHarness repositories workspace. Optional owner/repo values override the saved connection for this call.",
+    description: "Clone the connected GitHub repository into the designated Glitch repositories workspace. Optional owner/repo values override the saved connection for this call.",
     parameters: {
       type: "object",
       properties: {

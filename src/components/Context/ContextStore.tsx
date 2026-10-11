@@ -20,7 +20,7 @@ const ContextStore = createContext<ContextTrackerValue | null>(null);
 function readLegacyContext(): ContextTrackerState {
   const legacy = window.__legacyContextTop;
   if (legacy && typeof legacy.contextPercent === "number") {
-    console.warn("[NexusHarness] window.__legacyContextTop is deprecated. Use ContextStoreProvider/useContextTracker instead.");
+    console.warn("[Glitch] window.__legacyContextTop is deprecated. Use ContextStoreProvider/useContextTracker instead.");
     return {
       contextPercent: Math.max(0, Math.min(100, legacy.contextPercent)),
       lastUpdated: legacy.lastUpdated ?? new Date().toISOString(),

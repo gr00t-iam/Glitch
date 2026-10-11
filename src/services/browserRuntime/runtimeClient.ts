@@ -74,7 +74,7 @@ export class RuntimeClient {
       const url = new URL(wsUrl);
       url.searchParams.set("version", "1");
       url.searchParams.set("token", token);
-      const socket = new WebSocket(url.toString(), ["nexusharness.runtime.v1"]);
+      const socket = new WebSocket(url.toString(), ["glitch.runtime.v1"]);
       socket.addEventListener("open", () => resolve(socket), { once: true });
       socket.addEventListener("error", () => reject(new Error("WebSocket handshake failed.")), { once: true });
     });

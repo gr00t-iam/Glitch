@@ -733,7 +733,7 @@ export function AdminHub({
                       GitHub Connections
                       <Tooltip text="The token is saved by the local backend and is never returned to the browser after validation." />
                     </h2>
-                    <span>Connect one repository so NexusHarness can clone, branch, commit, push, and open pull requests.</span>
+                    <span>Connect one repository so Glitch can clone, branch, commit, push, and open pull requests.</span>
                   </div>
                   <span className={`badge ${badgeTone(githubStatus === "connected" ? "valid" : githubStatus === "checking" ? "checking" : githubStatus === "missing" ? "missing" : "invalid")}`}>
                     {githubStatus === "connected" ? "Connected" : githubStatus === "checking" ? "Checking..." : githubStatus === "missing" ? "Not connected" : "Needs attention"}
@@ -1176,7 +1176,7 @@ export function AdminHub({
                   <code>{safetySettings.audibleAlerts ? "Alert: Sound on" : "Alert: Silent"}</code>
                 </div>
                 <p className="metric">
-                  When a breakpoint matches, NexusHarness pauses the loop and shows Approve Action / Abort & Rewrite over the workspace.
+                  When a breakpoint matches, Glitch pauses the loop and shows Approve Action / Abort & Rewrite over the workspace.
                 </p>
               </section>
             </div>

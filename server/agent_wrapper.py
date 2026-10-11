@@ -42,11 +42,11 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="NexusHarness Agent Filesystem Wrapper",
+    title="Glitch Agent Filesystem Wrapper",
     version="0.1.0",
     description=(
         "Local FastAPI sidecar that exposes a confined execute_command tool "
-        "and chunked file-buffer reads for NexusHarness agents."
+        "and chunked file-buffer reads for Glitch agents."
     ),
     lifespan=lifespan,
 )

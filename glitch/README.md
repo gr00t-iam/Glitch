@@ -4,7 +4,7 @@ Glitch is a standalone Python desktop agent with a robotic owl companion, local 
 
 ## Launch the application
 
-1. Download `Glitch.exe` from the NexusHarness GitHub release or the **Glitch Windows** workflow artifact. Extract the artifact ZIP if using Actions.
+1. Download `Glitch.exe` from [the latest Glitch release](https://github.com/gr00t-iam/Glitch/releases/latest) or the **Glitch Windows** workflow artifact. Extract the artifact ZIP if using Actions.
 2. Install Microsoft Edge WebView2 Evergreen Runtime if Windows does not already have it. Windows 10/11 x64 and .NET Framework 4.8 are required by the native wrapper.
 3. Install and open the Ollama Windows application, then download a local model in Ollama. Choose a vision-capable model for screenshot-based desktop navigation.
 4. Double-click `Glitch.exe`. No Python, npm, or terminal is required to run the packaged app.
@@ -74,7 +74,7 @@ py -3.12 -m venv .venv-glitch
 
 The checked-in spec creates a single windowed executable containing the Python runtime, native wrapper dependencies, Discord client, computer tools and all UI assets. Build Windows binaries on Windows. A GitHub Actions Windows runner performs the same tests and build and publishes a downloadable artifact for each change.
 
-`requirements-lock.txt` pins the complete tested Windows build environment; `requirements.txt` lists the direct dependencies. The old `Start NexusHarness.cmd` now launches the compiled Glitch app and never invokes npm or a development server.
+`requirements-lock.txt` pins the complete tested Windows build environment; `requirements.txt` lists the direct dependencies. The optional `Start Glitch.cmd` shortcut launches the compiled app and never invokes npm or a development server.
 
 For source development only:
 
@@ -105,6 +105,6 @@ glitch/
 Build Glitch.cmd        Double-click source build helper
 ```
 
-The previous NexusHarness PWA and Electron sources remain available for migration reference. They are not loaded by `Glitch.exe`.
+The retained [PWA and Electron prototypes](../docs/legacy-development.md) are development references, not the supported desktop application. They are not loaded by `Glitch.exe`. Their stores, slash commands and repository tooling do not imply those features are present in the executable.
 
 Implementation references: [PyWebView native bridge](https://pywebview.flowrl.com/guide/usage.html), [PyInstaller spec files](https://pyinstaller.org/en/stable/spec-files.html), [Discord gateway intents](https://discordpy.readthedocs.io/en/stable/intents.html), [PyAutoGUI fail-safe behavior](https://pyautogui.readthedocs.io/en/latest/index.html), and [Chrome's isolated debugging profile requirement](https://developer.chrome.com/blog/remote-debugging-port).

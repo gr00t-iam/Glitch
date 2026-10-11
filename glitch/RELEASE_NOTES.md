@@ -1,4 +1,13 @@
-# Glitch 1.0.1 for Windows x64
+# Glitch 1.0.2 for Windows x64
+
+## Product identity and documentation
+
+- Repository and download links now point to `gr00t-iam/Glitch`.
+- New user-facing README and first-run guide explain project assistance, local reasoning, optional cloud audits, approvals, persistent context and private Discord control.
+- Retained web and Electron prototypes are explicitly labeled as development references, not features of the shipped executable.
+- Rebranded prototype UI, prompts, metadata, package names, launchers and supporting documentation.
+- Kept native conversations and encrypted keys unchanged; preserved prototype browser database and credential compatibility.
+- Added repository branding and prototype credential regression checks.
 
 ## Startup repair
 
@@ -30,7 +39,7 @@ The complete setup and build instructions are in `glitch/README.md`. `glitch/Gli
 
 ## Verification
 
-24 regression tests cover startup settings, WebView2 shutdown, persistent memory, DPAPI encryption, denial/cancellation gates, path boundaries, actual PowerShell output, HTTP provider transport and simulated Discord owner-only execution with approvals.
+27 Python regression tests cover repository branding, documentation links, startup settings, WebView2 shutdown, persistent memory, DPAPI encryption, denial/cancellation gates, path boundaries, actual PowerShell output, HTTP provider transport and simulated Discord owner-only execution with approvals. All 46 retained web prototype tests pass, including a credential compatibility regression test.
 
 The desktop smoke test now imports the machine environment before initializing the real WebView2 UI, testing settings, external navigation blocking, a blocked/approved write, persistent tool evidence and layout bounds. The previous version's Chrome navigation, CSS input/clicks, text retrieval and screenshots were tested against an isolated local test page.
 

@@ -164,7 +164,7 @@ export function SkillStore({ installedSkillIds, onClose, onCreateSkill, onInstal
   const [isGenerating, setIsGenerating] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [generatorDescription, setGeneratorDescription] = useState("");
-  const [generatorStatus, setGeneratorStatus] = useState("Describe a tool and NexusHarness will scaffold a local skill module.");
+  const [generatorStatus, setGeneratorStatus] = useState("Describe a tool and Glitch will scaffold a local skill module.");
   const [customSkill, setCustomSkill] = useState<CustomSkillForm>({
     name: "",
     description: "",

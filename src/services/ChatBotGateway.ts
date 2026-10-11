@@ -73,7 +73,7 @@ export async function handleChatWebhook(request: Request, onLog?: GatewayLogSink
   const session = await nexusDB.sessions.orderBy("createdAt").reverse().first();
   if (!session) {
     await onLog?.("chat", "No active session was available for webhook prompt.");
-    return jsonResponse({ ok: false, error: "No NexusHarness session is ready." }, 409);
+    return jsonResponse({ ok: false, error: "No Glitch session is ready." }, 409);
   }
 
   await onLog?.("service-worker", "Awakening background review and routing flow.");
@@ -85,7 +85,7 @@ export async function handleChatWebhook(request: Request, onLog?: GatewayLogSink
       {
         role: "system",
         content:
-          "You are NexusHarness, a concise personal automation helper. Reply in clear markdown without internal engineering terms.",
+          "You are Glitch, a concise personal automation helper. Reply in clear markdown without internal engineering terms.",
       },
       {
         role: "user",

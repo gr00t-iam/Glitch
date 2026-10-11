@@ -65,7 +65,7 @@ function compactJson(value: unknown): string {
 function buildMetaReviewerPrompt(logs: ExecutionLogEntry[]): string {
   const latestLogs = logs.slice(-15);
   return [
-    "You are the NexusHarness Self-Correcting Meta-Reviewer.",
+    "You are the Glitch Self-Correcting Meta-Reviewer.",
     "Inspect the last 15 execution steps and return one compact Markdown Local Skill Card.",
     "Requirements:",
     "1. Identify concrete tool errors and the smallest recovery action.",

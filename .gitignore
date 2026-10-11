@@ -9,7 +9,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .nexus_bin/
-.nexusharness/
+.glitch/
+.*harness*/
 .resync_nudge
 cache/*.wav
 .venv/

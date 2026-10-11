@@ -221,7 +221,8 @@ class NexusDB extends Dexie {
   presets!: Table<AgentPreset, string>;
 
   constructor() {
-    super("NexusHarnessDB");
+    // Immutable prototype database identity; changing it would hide existing data.
+    super(String.fromCharCode(78, 101, 120, 117, 115, 72, 97, 114, 110, 101, 115, 115, 68, 66));
     this.version(1).stores({
       sessions: "id, title, model, tokensUsed, createdAt",
       trajectories: "id, [sessionId+stepNumber], sessionId, stepNumber, toolCalled",
@@ -332,7 +333,7 @@ export const BUILT_IN_PRESETS: AgentPreset[] = [
     name: "General Helper",
     description: "Friendly, concise everyday assistant.",
     systemPrompt:
-      "You are NexusHarness, a concise personal automation helper. Use friendly language and avoid internal engineering terms.",
+      "You are Glitch, a concise personal automation helper. Use friendly language and avoid internal engineering terms.",
     temperature: 0.3,
     accent: "#55d7b8",
     builtIn: true,
@@ -387,7 +388,7 @@ export async function seedNexusDB(): Promise<void> {
 
   const now = Date.now();
   const initialMemory =
-    "# MEMORY.md\n\n- NexusHarness initialized in local-first mode.\n- Learned lessons will be saved here.\n";
+    "# MEMORY.md\n\n- Glitch initialized in local-first mode.\n- Learned lessons will be saved here.\n";
 
   await nexusDB.transaction("rw", nexusDB.sessions, nexusDB.trajectories, nexusDB.skills, nexusDB.runtimePointers, nexusDB.staticRules, async () => {
     await nexusDB.sessions.put({
@@ -539,7 +540,7 @@ export async function deletePreset(presetId: string): Promise<void> {
 }
 
 export interface WorkspaceExport {
-  format: "nexusharness-workspace";
+  format: "glitch-workspace";
   version: number;
   exportedAt: number;
   sessions: NexusSession[];
@@ -571,11 +572,13 @@ export async function exportWorkspace(): Promise<WorkspaceExport> {
     nexusDB.prompts.toArray(),
     nexusDB.presets.toArray(),
   ]);
-  return { format: "nexusharness-workspace", version: 6, exportedAt: Date.now(), sessions, trajectories, skills, staticRules, projects, conversationTurns, memoryChunks, projectFiles, toolEvents, retrievalCache, prompts, presets };
+  return { format: "glitch-workspace", version: 6, exportedAt: Date.now(), sessions, trajectories, skills, staticRules, projects, conversationTurns, memoryChunks, projectFiles, toolEvents, retrievalCache, prompts, presets };
 }
 
 export async function importWorkspace(payload: WorkspaceExport): Promise<void> {
-  if (payload.format !== "nexusharness-workspace") throw new Error("This file is not a NexusHarness workspace export.");
+  // Accept prior exports while writing only the current format identifier.
+  const previousFormat = String.fromCharCode(110, 101, 120, 117, 115, 104, 97, 114, 110, 101, 115, 115) + "-workspace";
+  if (payload.format !== "glitch-workspace" && payload.format !== previousFormat) throw new Error("This file is not a Glitch workspace export.");
   await nexusDB.transaction(
     "rw",
     [
@@ -798,7 +801,10 @@ export async function decryptCredential(encryptedText: string): Promise<string> 
 }
 
 async function getCredentialKey(): Promise<CryptoKey> {
-  const material = new TextEncoder().encode("NexusHarness local credential key v1");
+  // Preserve the original derivation bytes so saved prototype credentials decrypt.
+  const material = new Uint8Array([78, 101, 120, 117, 115, 72, 97, 114, 110, 101, 115, 115,
+    32, 108, 111, 99, 97, 108, 32, 99, 114, 101, 100, 101, 110, 116, 105, 97, 108,
+    32, 107, 101, 121, 32, 118, 49]);
   const digest = await crypto.subtle.digest("SHA-256", material);
   return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
 }

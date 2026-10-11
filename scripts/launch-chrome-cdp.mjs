@@ -7,7 +7,7 @@ const REMOTE_DEBUGGING_PORT = process.env.NEXUS_CDP_PORT ?? "9222";
 const HEADLESS = process.env.NEXUS_CHROME_HEADLESS !== "0";
 const REPLACE_EXISTING = process.env.NEXUS_REPLACE_EXISTING === "1";
 const userDataDir =
-  process.env.NEXUS_CHROME_USER_DATA_DIR ?? mkdtempSync(join(tmpdir(), `nexusharness-chrome-${REMOTE_DEBUGGING_PORT}-`));
+  process.env.NEXUS_CHROME_USER_DATA_DIR ?? mkdtempSync(join(tmpdir(), `glitch-chrome-${REMOTE_DEBUGGING_PORT}-`));
 const startUrl = process.env.NEXUS_CHROME_START_URL ?? "about:blank";
 
 const chromePath = findChromeExecutable();
@@ -39,7 +39,7 @@ const child = spawn(chromePath, args, {
 
 child.unref();
 
-console.log(`Launched ${HEADLESS ? "embedded" : "visible"} Google Chrome for NexusHarness.`);
+console.log(`Launched ${HEADLESS ? "embedded" : "visible"} Google Chrome for Glitch.`);
 console.log(`Remote debugging: http://127.0.0.1:${REMOTE_DEBUGGING_PORT}`);
 console.log(`Isolated profile: ${userDataDir}`);
 

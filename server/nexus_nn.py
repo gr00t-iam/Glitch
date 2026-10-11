@@ -1,4 +1,4 @@
-"""Configurable feed-forward neural network utilities for NexusHarness."""
+"""Configurable feed-forward neural network utilities for Glitch."""
 
 from __future__ import annotations
 

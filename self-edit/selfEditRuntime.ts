@@ -49,7 +49,7 @@ export async function runSelfEditLoop(
   const map = await buildCodebaseMap(workspaceRoot, { instruction });
 
   const systemPrompt = [
-    "You are NexusHarness's self-editing agent. You may read and modify files in this workspace using the provided tools.",
+    "You are Glitch's self-editing agent. You may read and modify files in this workspace using the provided tools.",
     "Rules:",
     "1. Always call snapshot_files on every path you intend to change, BEFORE the first write/replace to that path.",
     "2. Prefer replace_in_file with a small, unique oldText anchor over write_file. Only use write_file for new files or full rewrites.",

@@ -399,7 +399,7 @@ export class McpRouter {
     await this.rpc(server, "initialize", {
       protocolVersion: "2024-11-05",
       capabilities: { roots: { listChanged: true }, sampling: {} },
-      clientInfo: { name: "NexusHarness", version: "0.1.0" },
+      clientInfo: { name: "Glitch", version: "0.1.0" },
     });
   }
 

@@ -106,7 +106,7 @@ export interface GitHubActionResult {
   error?: string;
 }
 
-const WORKSPACE_EVENT = "nexusharness:workspace-changed";
+const WORKSPACE_EVENT = "glitch:workspace-changed";
 const ACTIVE_PROJECT_DIRECTORY_KEY = "NEXUS_ACTIVE_PROJECT_DIRECTORY";
 let activeProjectDirectory =
   typeof window !== "undefined" ? window.localStorage.getItem(ACTIVE_PROJECT_DIRECTORY_KEY) ?? "" : "";
@@ -328,7 +328,7 @@ export const agentTools: AgentToolSpec[] = [
   },
   {
     name: "github_clone_repo",
-    description: "Clone the connected GitHub repository into the NexusHarness repositories workspace. Optional owner/repo values override the saved connection for this call.",
+    description: "Clone the connected GitHub repository into the Glitch repositories workspace. Optional owner/repo values override the saved connection for this call.",
     parameters: {
       type: "object",
       properties: {
@@ -379,7 +379,7 @@ export async function executeAgentTool(name: string, args: Record<string, unknow
         ok: false,
         aborted: true,
         toolName: name,
-        message: "Action paused by NexusHarness safety controls. Rewrite the step without the risky operation.",
+        message: "Action paused by Glitch safety controls. Rewrite the step without the risky operation.",
       };
     }
   }

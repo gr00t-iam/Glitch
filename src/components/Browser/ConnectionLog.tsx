@@ -20,7 +20,7 @@ export function ConnectionLog({ logs }: ConnectionLogProps) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "nexusharness-browser-diagnostics.json";
+    anchor.download = "glitch-browser-diagnostics.json";
     anchor.click();
     URL.revokeObjectURL(url);
   }

@@ -99,7 +99,7 @@ function createTools({ workspacePath, requestApproval, settings }) {
         if (settings.requireApprovalForWrites) {
           const approved = await requestApproval({
             action: "write_file",
-            reason: `NexusHarness wants to write ${args.path}.`,
+            reason: `Glitch wants to write ${args.path}.`,
             risk: "high",
             payload: { path: args.path, preview: String(args.content || "").slice(0, 1200) },
           });
@@ -131,7 +131,7 @@ function createTools({ workspacePath, requestApproval, settings }) {
         if (settings.requireApprovalForShell) {
           const approved = await requestApproval({
             action: "run_shell",
-            reason: "NexusHarness wants to run a PowerShell command.",
+            reason: "Glitch wants to run a PowerShell command.",
             risk: "high",
             payload: { command, workspacePath },
           });

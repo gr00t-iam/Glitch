@@ -1,5 +1,5 @@
-export const browserObservationRequestEvent = "nexusharness:browser-observation-request";
-export const browserObservationResultEvent = "nexusharness:browser-observation-result";
+export const browserObservationRequestEvent = "glitch:browser-observation-request";
+export const browserObservationResultEvent = "glitch:browser-observation-result";
 
 export interface BrowserObservationRequest {
   requestId: string;

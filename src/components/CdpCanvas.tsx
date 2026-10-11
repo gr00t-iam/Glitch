@@ -299,8 +299,8 @@ export function CdpCanvas({
         updateStatus("error");
       }
     };
-    window.addEventListener("nexusharness:browser-command", handler);
-    return () => window.removeEventListener("nexusharness:browser-command", handler);
+    window.addEventListener("glitch:browser-command", handler);
+    return () => window.removeEventListener("glitch:browser-command", handler);
   }, [utilityTabs, allowAutomation]);
 
   useEffect(() => {

@@ -634,10 +634,10 @@ function markdownToHtml(markdown: string): string {
 
 function withSkillSandboxPolicy(promptSnippet: string, declaredSafetyRules: string[] = []): string {
   const policy = [
-    "NexusHarness Skill Sandbox Policy:",
+    "Glitch Skill Sandbox Policy:",
     "- This skill may shape planning, prompts, and registered tool choices only.",
     "- It must not execute arbitrary code, load remote scripts, bypass confirmations, or ask the model to reveal credentials.",
-    "- Browser, file, shell, network, GitHub, and OS actions must run only through registered NexusHarness tools and safety breakpoints.",
+    "- Browser, file, shell, network, GitHub, and OS actions must run only through registered Glitch tools and safety breakpoints.",
     "- Secrets must stay in the local vault or runtime headers and must never be printed into chat.",
     ...declaredSafetyRules.map((rule) => `- ${rule}`),
   ].join("\n");
@@ -712,7 +712,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error?: Erro
     if (this.state.error) {
       return (
         <main className="fatal-screen">
-          <h1>NexusHarness needs a refresh</h1>
+          <h1>Glitch needs a refresh</h1>
           <p>{this.state.error.message}</p>
         </main>
       );
@@ -724,12 +724,12 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error?: Erro
 export default function App() {
   return (
     <AppErrorBoundary>
-      <NexusHarness />
+      <Glitch />
     </AppErrorBoundary>
   );
 }
 
-function NexusHarness() {
+function Glitch() {
   const { setContext } = useContextTracker();
   const [sessions, setSessions] = useState<NexusSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("session_bootstrap");
@@ -1014,8 +1014,8 @@ function NexusHarness() {
       const detail = (event as CustomEvent<{ tools: PluginToolSchema[] }>).detail;
       if (detail?.tools) setPluginTools(detail.tools);
     };
-    window.addEventListener("nexusharness:plugins-changed", handler);
-    return () => window.removeEventListener("nexusharness:plugins-changed", handler);
+    window.addEventListener("glitch:plugins-changed", handler);
+    return () => window.removeEventListener("glitch:plugins-changed", handler);
   }, []);
 
   useEffect(() => {
@@ -1118,7 +1118,7 @@ function NexusHarness() {
     await seedNexusDB();
     await refreshLocalState();
     await discoverLocalModels(false);
-    appendRuntimeLog("app", "NexusHarness dashboard loaded.");
+    appendRuntimeLog("app", "Glitch dashboard loaded.");
     try {
       setTools(await mcpRouterRef.current.refreshTools("openai"));
     } catch {
@@ -1338,7 +1338,7 @@ function NexusHarness() {
     await refreshLocalState();
     setActiveSessionId(session.id);
     const priorContext = await recallSemanticMemory(
-      "NexusHarness user preferences active projects prior automation tasks current development goals recent unresolved issues",
+      "Glitch user preferences active projects prior automation tasks current development goals recent unresolved issues",
       session.id,
     );
     const initialMessages: ChatMessage[] = [
@@ -1423,7 +1423,7 @@ function NexusHarness() {
     if (!installPrompt) return;
     await installPrompt.prompt();
     const choice = await installPrompt.userChoice;
-    if (choice.outcome === "accepted") toast.push("Installing NexusHarness...", "success");
+    if (choice.outcome === "accepted") toast.push("Installing Glitch...", "success");
     setInstallPrompt(null);
   }
 
@@ -1433,7 +1433,7 @@ function NexusHarness() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `nexusharness-workspace-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.download = `glitch-workspace-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
     toast.push("Workspace exported", "success");
@@ -1684,7 +1684,7 @@ function NexusHarness() {
     // Browser progress belongs in the visible assistant stream, not the diagnostic log.
     setIsThinking(false);
     setMessages((current) => [...current, { id: createId("msg"), role: "agent", markdown }]);
-    window.dispatchEvent(new CustomEvent("nexusharness:assistant-status", { detail: { message: markdown, source: "browser" } }));
+    window.dispatchEvent(new CustomEvent("glitch:assistant-status", { detail: { message: markdown, source: "browser" } }));
     void speakWithPiper(stripMarkdownForSpeech(markdown)).catch(() => {
       appendRuntimeLog("app", "Piper voice is unavailable right now.");
     });
@@ -1694,7 +1694,7 @@ function NexusHarness() {
     const agentsTemplate = [
       "# AGENTS.md",
       "",
-      "## NexusHarness Workspace Instructions",
+      "## Glitch Workspace Instructions",
       "- Prefer small, reviewable changes.",
       "- Run the narrowest useful verification before claiming a task is complete.",
       "- Keep browser automation visible in the Live Browser Session panel.",
@@ -1708,7 +1708,7 @@ function NexusHarness() {
       "# CLAUDE.md",
       "",
       "## Project Context",
-      "NexusHarness is a local-first agent automation PWA with browser control, plugin tools, and self-healing lessons.",
+      "Glitch is a local-first agent automation PWA with browser control, plugin tools, and self-healing lessons.",
       "",
       "## Operating Rules",
       "- Read existing code before editing.",
@@ -1797,7 +1797,7 @@ function NexusHarness() {
     }
     const existing = await workspace.read("NEXUS_LEARNED_RULES.md");
     const nextContent = [
-      existing.ok ? existing.content : "# NexusHarness Learned Rules\n",
+      existing.ok ? existing.content : "# Glitch Learned Rules\n",
       "",
       `## Learned ${new Date().toISOString()}`,
       "",
@@ -1870,7 +1870,7 @@ function NexusHarness() {
         case "diff":
           setBrowserExpanded(true);
           window.setTimeout(() => {
-            window.dispatchEvent(new CustomEvent("nexusharness:browser-command", { detail: { type: "utility", utility: "review" } }));
+            window.dispatchEvent(new CustomEvent("glitch:browser-command", { detail: { type: "utility", utility: "review" } }));
           }, 50);
           appendRuntimeLog("app", "Opened the Review tab.");
           appendSystemMessage("Opened the code review panel with the current workspace diff.");
@@ -2119,8 +2119,8 @@ function NexusHarness() {
 
       const personaPrompt = isPowerMode
         ? activePreset?.systemPrompt ??
-          "You are NexusHarness, a concise personal automation helper. Use friendly language and avoid internal engineering terms."
-        : "You are NexusHarness in Safe Mode. Use only local, conversational help. Do not claim to browse, click, run shell commands, open files, or execute automations.";
+          "You are Glitch, a concise personal automation helper. Use friendly language and avoid internal engineering terms."
+        : "You are Glitch in Safe Mode. Use only local, conversational help. Do not claim to browse, click, run shell commands, open files, or execute automations.";
       const runtimeDirectives = [
         planningMode ? "Planning State is active: draft architecture, risks, and implementation order before modifying files." : "",
         autoApproveMode ? "Full Auto-Approve Mode is active for approved automation flows." : "",
@@ -2438,8 +2438,8 @@ function NexusHarness() {
         "",
         ...threadMessages.map((message) => [`## ${message.role}`, "", (message.fullMarkdown ?? message.markdown).trim() || "_No content yet._", ""].join("\n")),
       ];
-      await workspace.makeDir(".nexusharness/chats");
-      await workspace.write(`.nexusharness/chats/${session.id}.md`, rows.join("\n"));
+      await workspace.makeDir(".glitch/chats");
+      await workspace.write(`.glitch/chats/${session.id}.md`, rows.join("\n"));
     } catch (error) {
       appendRuntimeLog("app", `Chat transcript was not saved to Projects: ${error instanceof Error ? error.message : "unknown error"}.`);
     }
@@ -2699,8 +2699,8 @@ function NexusHarness() {
         setTerminalOpen(true);
       }
     };
-    window.addEventListener("nexusharness:terminal-output", handleTerminalOutput);
-    return () => window.removeEventListener("nexusharness:terminal-output", handleTerminalOutput);
+    window.addEventListener("glitch:terminal-output", handleTerminalOutput);
+    return () => window.removeEventListener("glitch:terminal-output", handleTerminalOutput);
   }, []);
 
   useEffect(() => {
@@ -2718,9 +2718,9 @@ function NexusHarness() {
     const handler = () => {
       if (activeProjectDirectory) void loadProjectFolder(activeProjectDirectory);
     };
-    window.addEventListener("nexusharness:workspace-changed", handler);
+    window.addEventListener("glitch:workspace-changed", handler);
     return () => {
-      window.removeEventListener("nexusharness:workspace-changed", handler);
+      window.removeEventListener("glitch:workspace-changed", handler);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectDirectory]);
@@ -2981,7 +2981,7 @@ function NexusHarness() {
         <div className="install-banner">
           <Download size={20} />
           <div>
-            <strong>Install NexusHarness</strong>
+            <strong>Install Glitch</strong>
             <span>Run it as a desktop app, offline-ready.</span>
           </div>
           <button className="install-accept" onClick={() => void handleInstall()}>
@@ -2994,12 +2994,12 @@ function NexusHarness() {
       )}
       {isPowerMode && leftPanelOpen && (
       <>
-      <aside className="sidebar left" aria-label="NexusHarness navigation">
+      <aside className="sidebar left" aria-label="Glitch navigation">
         <div className="brand-block">
-          <div className="brand-mark">NH</div>
+          <div className="brand-mark" aria-hidden="true">G</div>
           <div>
-            <h1>NexusHarness</h1>
-            <span>Open WebUI control hub</span>
+            <h1>Glitch</h1>
+            <span>Local AI companion</span>
           </div>
           <button
             className="sidebar-collapse-button"
@@ -3400,7 +3400,7 @@ function NexusHarness() {
               />
             )}
             <input
-              aria-label="Message NexusHarness"
+              aria-label="Message Glitch"
               onChange={(event) => {
                 setPrompt(event.target.value);
                 setSlashDismissed(false);

@@ -16,7 +16,7 @@ export interface HumanApprovalPushPayload {
   reason: string;
 }
 
-const RUNTIME_CACHE = "nexusharness-runtime-v1";
+const RUNTIME_CACHE = "glitch-runtime-v1";
 
 self.skipWaiting();
 clientsClaim();
@@ -97,9 +97,9 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     Promise.all([
       broadcastRuntimeLog("service-worker", "Human approval notification received."),
-      self.registration.showNotification(payload.title ?? "NexusHarness approval required", {
+      self.registration.showNotification(payload.title ?? "Glitch approval required", {
       body: `${payload.agentName} is blocked on ${payload.toolName}: ${payload.reason}`,
-      tag: `nexusharness-approval-${payload.requestId}`,
+      tag: `glitch-approval-${payload.requestId}`,
       renotify: true,
       requireInteraction: true,
       icon: "/icons/icon-192.svg",
