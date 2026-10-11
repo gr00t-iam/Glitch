@@ -16,3 +16,7 @@ cache/*.wav
 
 __pycache__/
 *.pyc
+.venv-glitch/
+build/
+glitch-test-output/
+Glitch.exe

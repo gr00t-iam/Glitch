@@ -1,5 +1,13 @@
 # NexusHarness
 
+## Glitch Windows Desktop App
+
+The standalone Windows application is now **Glitch**, a robotic owl companion with a Python/PyWebView desktop shell, local Ollama worker, optional cloud supervisor, approved native computer and Chrome tools, and owner-locked Discord control. It runs from `Glitch.exe` with no npm, Node.js or Python installation required on the user's machine.
+
+See [Glitch setup, architecture, Discord configuration and Windows build guide](glitch/README.md). The complete Python implementation is in `glitch/`. Double-click `Build Glitch.cmd` to build from source (Python 3.12 required for building only). GitHub Actions also produces a Windows executable artifact.
+
+The sections below document the previous Electron/PWA application, retained for migration reference.
+
 NexusHarness is a local-first UI for running local LLM harnesses and guarded autonomous agent workflows.
 
 ## Desktop Agent Runtime

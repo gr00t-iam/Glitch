@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'">
+  <title>Glitch</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><img src="owl.svg" alt="Glitch the robotic owl"><div><strong>Glitch</strong><span>Your local agent companion</span></div></div>
+    <div class="section-heading"><h2>Projects</h2><button id="choose" title="Choose project folder" aria-label="Choose project folder">+</button></div>
+    <button id="project" class="project-button">Choose a project folder</button>
+    <div class="section-heading"><h2>Conversations</h2><button id="new" title="New conversation" aria-label="New conversation">+</button></div>
+    <nav id="sessions" aria-label="Conversations"></nav>
+    <div class="sidebar-bottom"><div id="discord-state" class="muted">Discord is disconnected</div><button id="settings-open">Settings &amp; connections</button><small>Private by default. Approvals stay on.</small></div>
+  </aside>
+  <main>
+    <header class="topbar"><div><h1>Workspace</h1><span id="workspace-path" class="muted">Choose where Glitch should work</span></div><div class="top-actions"><span id="mode" class="pill">Local only</span><button id="stop" disabled>Stop task</button></div></header>
+    <div class="companion" id="companion"><img src="owl.svg" alt=""><div><strong id="status">Glitch is ready</strong><span id="status-detail">Local reasoning. Verified actions. A watchful companion.</span></div><span class="status-dot"></span></div>
+    <div class="workspace">
+      <section class="conversation"><div id="messages" class="messages" aria-live="polite"><div id="welcome" class="welcome"><img src="owl.svg" alt="Glitch"><h2>A little owl. A careful co-pilot.</h2><p>Choose a project, pick your local model, and give Glitch a task.</p></div></div>
+        <form id="composer"><label class="sr-only" for="prompt">Message Glitch</label><textarea id="prompt" rows="3" placeholder="Ask Glitch to inspect, build, or fix something..."></textarea><div class="composer-footer"><span id="model-label" class="muted">No local model selected</span><button id="send" class="primary" type="submit">Send task</button></div></form>
+      </section>
+      <aside class="timeline"><div class="section-heading"><h2>Execution timeline</h2><span id="event-count" class="pill">0</span></div><div id="events"><p class="empty">Verified actions and command output appear here.</p></div></aside>
+    </div>
+  </main>
+</div>
+<dialog id="settings-dialog">
+  <div class="dialog-header"><div><h2>Settings &amp; connections</h2><p class="muted">Give Glitch the right tools for your project.</p></div><button id="settings-close" aria-label="Close settings">×</button></div>
+  <div class="settings-tabs" role="tablist"><button id="tab-models" role="tab" aria-selected="true" data-tab="models">Models &amp; supervision</button><button id="tab-discord" role="tab" aria-selected="false" data-tab="discord">Discord control</button><button id="tab-tools" role="tab" aria-selected="false" data-tab="tools">Computer &amp; safety</button></div>
+  <form id="settings-form">
+    <section id="settings-models" role="tabpanel" aria-labelledby="tab-models">
+      <div class="field-grid"><label>Execution mode<select id="setting-mode"><option value="local">Worker only — no cloud supervisor</option><option value="hybrid">Hybrid — local worker with cloud audits</option></select></label><label>Ollama endpoint<input id="ollama-url" type="url" required></label></div>
+      <div class="model-field"><label>Local model<input id="worker-model" list="model-options" placeholder="Select a downloaded model"><datalist id="model-options"></datalist></label><button id="discover" type="button">Find local models</button></div><p id="discover-result" class="muted" aria-live="polite">Ollama must be running. For screenshots, choose a model with vision support.</p>
+      <hr><h3>Cloud supervisor</h3><p class="muted">Hybrid mode sends your task and up to 15 recent, redacted tool actions to the configured cloud service. Screenshots stay out of cloud audits.</p>
+      <div class="field-grid"><label>API endpoint<input id="supervisor-url" type="url" required></label><label>Supervisor model<input id="supervisor-model" required></label></div>
+      <label>Supervisor API key<input id="supervisor-key" type="password" autocomplete="off" placeholder="Leave blank to keep the saved key"></label><label class="checkbox"><input id="clear-key" type="checkbox">Remove saved supervisor key</label>
+      <div class="field-grid"><label>Audit every N tool steps<input id="audit-interval" type="number" min="1" max="100" required></label><label>Maximum steps per task<input id="max-steps" type="number" min="1" max="100" required></label></div>
+    </section>
+    <section id="settings-discord" role="tabpanel" aria-labelledby="tab-discord" hidden>
+      <h3>Bring Glitch along</h3><p class="muted">Use a Discord bot account, never your personal account token. Only the User ID below can issue commands or approve actions.</p>
+      <label>Bot token<input id="discord-token" type="password" autocomplete="off" placeholder="Leave blank to keep the saved token"></label>
+      <div class="field-grid"><label>Your Discord User ID<input id="discord-user" inputmode="numeric" placeholder="Copy User ID in Discord Developer Mode"></label><label>Private channel ID (optional)<input id="discord-channel" inputmode="numeric" placeholder="Blank allows direct messages only"></label></div>
+      <label class="checkbox"><input id="clear-discord" type="checkbox">Remove saved bot token</label><p class="muted">Enable Message Content Intent in the Discord Developer Portal. A server channel must deny @everyone access. Remote tasks use the most recently created conversation's project folder.</p>
+      <div class="connection-actions"><button id="connect-discord" type="button">Connect Discord</button><button id="disconnect-discord" type="button">Disconnect</button></div><p id="discord-detail" class="muted" aria-live="polite"></p><div class="commands"><code>!task Fix the tests in this project</code><code>!status</code><code>!stop</code></div>
+    </section>
+    <section id="settings-tools" role="tabpanel" aria-labelledby="tab-tools" hidden>
+      <h3>You stay in control</h3><ul class="safety-list"><li>Every file write shows a diff for approval.</li><li>Commands use fixed, approved recipes; there is no arbitrary shell string execution.</li><li>Desktop clicks, typing, browser actions and screenshots each require approval. Unicode typing temporarily uses and restores the clipboard.</li><li>Remote approvals are available in your Discord channel and here.</li><li>Chrome uses a separate profile on loopback port 9222. Your existing browser tabs stay separate.</li><li>Move your mouse to a screen corner to activate the desktop input fail-safe.</li><li>Glitch must stay open on an awake, unlocked desktop for remote computer tasks.</li></ul>
+      <h3>Command recipes</h3><p class="muted">Git status, diff and log; Python unit tests; .NET build; PowerShell directory listing. Tests and builds execute project code after approval.</p><h3>Local storage</h3><p class="muted">Conversations, timeline and correction anchors persist under %LOCALAPPDATA%\Glitch. API keys and the Discord token use Windows data protection.</p>
+    </section>
+    <div class="dialog-footer"><span id="save-result" class="muted" aria-live="polite"></span><button class="primary" type="submit">Save settings</button></div>
+  </form>
+</dialog>
+<dialog id="approval-dialog"><div class="dialog-header"><div><span class="pill amber">Approval required</span><h2 id="approval-title">Glitch needs your permission</h2></div></div><p class="muted">Review the exact action before Glitch continues.</p><pre id="approval-payload"></pre><div class="dialog-footer"><button id="deny">Abort &amp; Rewrite</button><button id="approve" class="primary">Approve Action</button></div></dialog>
+<div id="toasts" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body></html>

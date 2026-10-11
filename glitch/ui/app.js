@@ -1,0 +1,163 @@
+'use strict';
+const $ = (id) => document.getElementById(id);
+const state = {session: null, cursor: 0, settings: {}, sessions: [], pending: null, running: null, lastRun: null, count: 0, ready: false, polling: false};
+function toast(text, error = false) {
+  const node = document.createElement('div'); node.className = 'toast' + (error ? ' error' : ''); node.textContent = text;
+  $('toasts').append(node); setTimeout(() => node.remove(), error ? 8000 : 5500);
+}
+async function call(method, ...args) {
+  if (!state.ready) throw new Error('The desktop bridge is still starting.');
+  try { return await window.pywebview.api[method](...args); }
+  catch (error) { throw new Error(error.message || String(error)); }
+}
+function status(title, kind = '') {
+  $('status').textContent = title;
+  $('companion').className = 'companion' + (['local','tool','browser','computer'].includes(kind) ? ' busy' : kind === 'supervisor' ? ' busy cloud' : '');
+}
+function addMessage(role, content) {
+  $('welcome')?.remove();
+  const node = document.createElement('article'); node.className = 'message ' + role;
+  const label = document.createElement('span'); label.className = 'role'; label.textContent = role === 'user' ? 'You' : 'Glitch';
+  const text = document.createElement('div'); text.textContent = content; node.append(label, text); $('messages').append(node);
+  $('messages').scrollTop = $('messages').scrollHeight;
+}
+function addEvent(event, live = false) {
+  $('events').querySelector('.empty')?.remove();
+  const node = document.createElement('details'); node.className = 'event ' + event.kind;
+  const summary = document.createElement('summary'), marker = document.createElement('span'); marker.className = 'marker';
+  marker.textContent = event.kind === 'error' ? '!' : event.kind === 'completed' || event.kind === 'result' ? '✓' : '·';
+  const title = document.createElement('span'); title.textContent = event.title; summary.append(marker, title);
+  const time = document.createElement('time'); time.textContent = new Date(event.created_at.replace(' ', 'T') + 'Z').toLocaleTimeString();
+  if (event.payload.duration_ms !== undefined) time.textContent += ` · ${event.payload.duration_ms} ms`;
+  const detail = document.createElement('pre'); detail.textContent = event.payload.text || event.payload.result?.diff || JSON.stringify(event.payload, null, 2);
+  node.append(summary, time, detail); $('events').append(node);
+  if (event.kind === 'output') node.open = true;
+  if (event.kind === 'capture') {
+    call('screenshot', event.payload.path).then(data => {const image = document.createElement('img'); image.src = 'data:image/png;base64,' + data; image.alt = 'Approved screenshot'; node.append(image); node.open = true;}).catch(e => toast(e.message, true));
+  }
+  state.count++; $('event-count').textContent = String(state.count);
+  if (live) {
+    if (event.kind === 'message') addMessage('assistant', event.payload.text);
+    if (['started','local','supervisor','browser','computer','completed','stopped','paused'].includes(event.kind)) status(event.title, event.kind);
+    if (['correction','anchor'].includes(event.kind)) {toast(event.title); status(event.title);}
+    if (event.kind === 'error') toast(event.title, true);
+  }
+  while ($('events').children.length > 200) $('events').firstElementChild.remove();
+  if (live) $('events').scrollTop = $('events').scrollHeight;
+}
+function renderSessions() {
+  $('sessions').replaceChildren();
+  state.sessions.forEach(session => {
+    const node = document.createElement('button'); node.className = 'session' + (state.session === session.id ? ' active' : '');
+    const title = document.createElement('strong'); title.textContent = session.title;
+    const path = document.createElement('small'); path.textContent = session.workspace.split(/[\\/]/).pop(); node.append(title, path);
+    node.title = session.workspace; node.onclick = () => selectSession(session.id).catch(e => toast(e.message, true)); $('sessions').append(node);
+  });
+  const active = state.sessions.find(s => s.id === state.session);
+  $('project').textContent = active?.workspace.split(/[\\/]/).pop() || 'Choose a project folder';
+  $('project').title = active?.workspace || ''; $('workspace-path').textContent = active?.workspace || 'Choose where Glitch should work';
+}
+async function selectSession(identifier) {
+  state.session = identifier; state.cursor = 0; state.count = 0;
+  const result = await call('load_conversation', identifier);
+  if (state.session !== identifier) return;
+  $('messages').replaceChildren(); $('events').replaceChildren(); $('event-count').textContent = '0';
+  result.messages.forEach(m => addMessage(m.role, m.content));
+  result.events.forEach(e => {addEvent(e); state.cursor = e.id;});
+  // Drain archived timeline pages without replaying assistant messages into the loaded conversation.
+  while (result.events.length === 300) {
+    const page = await call('poll', identifier, state.cursor);
+    if (state.session !== identifier) return;
+    result.events = page.events; page.events.forEach(e => {addEvent(e); state.cursor = e.id;});
+  }
+  renderSessions();
+}
+function updateRuntime(runtime) {
+  state.running = runtime.running_session;
+  $('stop').disabled = !state.running; $('send').disabled = !!state.running || !state.session;
+  $('choose').disabled = !!state.running; $('new').disabled = !!state.running;
+  $('prompt').disabled = !!state.running;
+  const pending = runtime.approval;
+  if (pending && state.pending?.id !== pending.id) {
+    state.pending = pending; $('approval-title').textContent = pending.action;
+    $('approval-payload').textContent = JSON.stringify(pending.payload, null, 2);
+    if (!$('approval-dialog').open) $('approval-dialog').showModal();
+    status('Glitch is waiting for your approval');
+  } else if (!pending && state.pending) {state.pending = null; $('approval-dialog').close();}
+}
+function updateSettings(settings) {
+  state.settings = settings; $('mode').textContent = settings.mode === 'hybrid' ? 'Hybrid supervision' : 'Local only';
+  $('model-label').textContent = settings.worker_model || 'No local model selected';
+  $('status-detail').textContent = settings.mode === 'hybrid' ? 'Local worker · Cloud audits on errors, loops and step milestones' : 'Your worker endpoint handles reasoning; cloud audits are off';
+}
+function populateSettings() {
+  const s = state.settings;
+  for (const [id, key] of Object.entries({'setting-mode':'mode','ollama-url':'ollama_url','worker-model':'worker_model','supervisor-url':'supervisor_url','supervisor-model':'supervisor_model','audit-interval':'audit_interval','max-steps':'max_steps','discord-user':'discord_user_id','discord-channel':'discord_channel_id'})) $(id).value = s[key];
+  $('supervisor-key').value = ''; $('discord-token').value = ''; $('clear-key').checked = false; $('clear-discord').checked = false;
+  $('supervisor-key').placeholder = s.key_saved ? 'Key saved securely — leave blank to keep' : 'Enter supervisor API key';
+  $('discord-token').placeholder = s.discord_token_saved ? 'Token saved securely — leave blank to keep' : 'Enter Discord bot token';
+}
+async function saveSettings() {
+  const result = await call('save_settings', {
+    mode:$('setting-mode').value, ollama_url:$('ollama-url').value, worker_model:$('worker-model').value,
+    supervisor_url:$('supervisor-url').value, supervisor_model:$('supervisor-model').value,
+    supervisor_key:$('supervisor-key').value, clear_key:$('clear-key').checked,
+    audit_interval:Number($('audit-interval').value), max_steps:Number($('max-steps').value),
+    discord_token:$('discord-token').value, discord_user_id:$('discord-user').value.trim(),
+    discord_channel_id:$('discord-channel').value.trim(), clear_discord_token:$('clear-discord').checked,
+  });
+  updateSettings(result); populateSettings(); $('save-result').textContent = 'Saved locally';
+}
+async function choose() {
+  const session = await call('choose_workspace'); if (!session) return;
+  state.sessions.unshift(session); await selectSession(session.id); toast('Project selected');
+}
+$('choose').onclick = () => choose().catch(e => toast(e.message, true)); $('project').onclick = $('choose').onclick;
+$('new').onclick = async () => {try {if (!state.session) return await choose(); const session = await call('new_conversation', state.session); state.sessions.unshift(session); await selectSession(session.id); status('Glitch is ready');} catch(e){toast(e.message,true);}};
+$('settings-open').onclick = () => {populateSettings(); $('settings-dialog').showModal();};
+$('settings-close').onclick = () => {$('settings-dialog').close(); $('supervisor-key').value=''; $('discord-token').value='';};
+$('settings-dialog').addEventListener('close', () => {$('supervisor-key').value=''; $('discord-token').value='';});
+$('settings-form').onsubmit = async e => {e.preventDefault(); try {await saveSettings(); toast('Settings saved');} catch(error){toast(error.message,true);}};
+document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => {
+  document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b === button)));
+  ['models','discord','tools'].forEach(name => $('settings-'+name).hidden = name !== button.dataset.tab);
+});
+$('discover').onclick = async () => {
+  $('discover').disabled = true; $('discover-result').textContent = 'Checking Ollama...';
+  try {await saveSettings(); const models = await call('discover_models'); $('model-options').replaceChildren(); models.forEach(model => {const option=document.createElement('option');option.value=model.name;option.label=`${model.name} · ${(model.size/1e9).toFixed(1)} GB`;$('model-options').append(option);}); $('discover-result').textContent = models.length ? `${models.length} local models found. Choose one above.` : 'No models downloaded yet. Download a model in the Ollama app.';} catch(e){$('discover-result').textContent=e.message;}
+  finally {$('discover').disabled=false;}
+};
+$('connect-discord').onclick = async () => {try {await saveSettings();const result=await call('connect_discord');$('discord-detail').textContent=result.message;} catch(e){toast(e.message,true);}};
+$('disconnect-discord').onclick = async () => {try {const result=await call('disconnect_discord');$('discord-detail').textContent=result.message;} catch(e){toast(e.message,true);}};
+$('composer').onsubmit = async e => {e.preventDefault(); const prompt=$('prompt').value.trim(); if (!prompt || !state.session || state.running) return;
+  $('send').disabled=true; try {await call('send',state.session,prompt);addMessage('user',prompt);$('prompt').value='';state.running=state.session;} catch(error){toast(error.message,true);$('send').disabled=false;}
+};
+$('prompt').addEventListener('keydown', e => {if (e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('composer').requestSubmit();}});
+$('stop').onclick = () => call('stop').then(() => status('Stopping Glitch safely...')).catch(e => toast(e.message,true));
+async function resolveApproval(answer) {try {await call('approve',state.pending.id,answer);$('approval-dialog').close();} catch(e){toast(e.message,true);}}
+$('approve').onclick = () => resolveApproval(true); $('deny').onclick = () => resolveApproval(false);
+$('approval-dialog').addEventListener('cancel', e => {e.preventDefault();resolveApproval(false);});
+let ticks=0;
+async function poll() {
+  if (!state.ready || state.polling) return;
+  state.polling=true; const identifier=state.session;
+  try {
+    if (identifier) {const result=await call('poll',identifier,state.cursor); if(identifier===state.session){result.events.forEach(event=>{addEvent(event,true);state.cursor=event.id;});updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';$('discord-detail').textContent=result.discord.message || '';}}
+    if (++ticks%10===0 || !identifier) {
+      const result=await call('bootstrap');state.sessions=result.sessions;updateRuntime(result.runtime);renderSessions();
+      if(result.runtime.running_session && result.runtime.running_session !== state.lastRun) {
+        state.lastRun=result.runtime.running_session;
+        if(state.session !== state.lastRun) await selectSession(state.lastRun);
+      } else if(!state.session&&state.sessions.length) await selectSession(state.sessions[0].id);
+      $('discord-state').textContent=result.discord.message || 'Discord is disconnected';
+    }
+  } catch(e) {status('Glitch connection interrupted. Retrying...');}
+  finally {state.polling=false;}
+}
+window.addEventListener('pywebviewready', async () => {
+  if (state.ready) return;
+  state.ready=true;
+  try {const result=await call('bootstrap');updateSettings(result.settings);state.sessions=result.sessions;if(state.sessions.length)await selectSession(state.sessions[0].id);updateRuntime(result.runtime);$('discord-state').textContent=result.discord.message || 'Discord is disconnected';}
+  catch(e){toast(e.message,true);}
+  setInterval(poll,600);
+});
