@@ -94,7 +94,8 @@ class PreviewTests(unittest.TestCase):
         controller.vault = self.vault
         socket = Mock()
         text = 'a' * 17990 + SYNTHETIC + 'tail'
-        socket.recv.return_value = json.dumps({'id': 1, 'result': {'result': {'value': text}}})
+        socket.recv.return_value = json.dumps({'id': 1, 'result': {'result': {
+            'value': {'text': text, 'truncated': False}}}})
         pages = [{'id': 'fixture', 'webSocketDebuggerUrl': 'ws://127.0.0.1:9222/devtools/page/fixture'}]
         with patch.object(controller, 'ensure', return_value=pages), \
                 patch('websocket.create_connection', return_value=socket):
@@ -102,3 +103,20 @@ class PreviewTests(unittest.TestCase):
         self.assertNotIn(SYNTHETIC[:10], result['value'])
         self.assertLessEqual(len(result['value']), 18000)
         self.assertNotIn('slice(0,18000)', socket.send.call_args.args[0])
+
+    def test_chrome_incomplete_unicode_snapshot_never_flushes_secret_prefix(self):
+        from glitch.redaction import RESULT
+        secret = 'fixture-private-\U0001f600-value-7F9Q2Z'
+        self.vault.save('Unicode fixture', 'bearer', 'https://example.invalid', {'token': secret})
+        controller = ChromeController(self.root, self.cancel, vault=self.vault)
+        socket = Mock()
+        text = '\U0001f600' * 9010 + secret[:20]
+        socket.recv.return_value = json.dumps({'id': 1, 'result': {'result': {
+            'value': {'text': text, 'truncated': True}}}})
+        pages = [{'id': 'fixture', 'webSocketDebuggerUrl': 'ws://127.0.0.1:9222/devtools/page/fixture'}]
+        with patch.object(controller, 'ensure', return_value=pages), \
+                patch('websocket.create_connection', return_value=socket):
+            result = self.vault.redact(controller.action({'action': 'text'}), RESULT)
+        self.assertIsInstance(result['value'], str)
+        self.assertFalse(secret[:8] in result['value'])
+        self.assertLessEqual(len(result['value']), 18000)

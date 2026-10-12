@@ -134,7 +134,11 @@ class ChromeController:
             if action == 'text':
                 stream = self.vault.text_stream() if self.vault else None
                 text_limit = 18001 + (stream.carry if stream else 0)
-                expression = f'document.body.innerText.slice(0,{text_limit})'
+                # JS string iteration counts code points, matching the host carry.
+                expression = ('(()=>{const source=document.body.innerText;let end=0,count=0;'
+                              f'for(const point of source){{if(count==={text_limit})break;'
+                              'end+=point.length;count++;}'
+                              'return {text:source.slice(0,end),truncated:end<source.length};})()')
             else:
                 selector = json.dumps(args.get('selector', ''))
                 if not args.get('selector'):
@@ -150,9 +154,13 @@ class ChromeController:
             if result.get('exceptionDetails'):
                 raise ValueError('Browser action failed: element missing or inaccessible.')
             value = result.get('result', {}).get('value')
-            if action == 'text' and isinstance(value, str):
-                value = ((stream.feed(value) + stream.finish(incomplete=len(value) >= text_limit))
-                         if stream else value)[:18000]
+            if action == 'text':
+                if (not isinstance(value, dict) or not isinstance(value.get('text'), str) or
+                        type(value.get('truncated')) is not bool):
+                    raise ValueError('Chrome did not return a bounded text snapshot.')
+                text = value['text']
+                value = ((stream.feed(text) + stream.finish(incomplete=value['truncated']))
+                         if stream else text)[:18000]
             return {'ok': True, 'value': value}
         finally:
             connection.close()
