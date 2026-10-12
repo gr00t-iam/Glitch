@@ -26,6 +26,12 @@
 .vault-entry .pill{justify-self:start;font-size:11px}
 #vault-result{min-height:22px;overflow-wrap:anywhere}
 #vault-fields input,#vault-fields textarea,#vault-fields select{max-width:100%;min-width:0}
+#github-fields{border:0;padding:0;margin:0;min-width:0}
+#github-fields input,#github-fields select{max-width:100%;min-width:0}
+#github-parent,#github-account,#github-permissions,#github-result{overflow-wrap:anywhere;min-width:0}
+#github-result{min-height:22px}
+#github-fields details{padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px}
+#github-fields summary{cursor:pointer;color:var(--muted);margin-bottom:8px}
 .history-row{display:flex;gap:4px;align-items:center;min-width:0}
 .history-row .session{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .history-remove{flex:0 0 30px;width:30px;height:30px;padding:0;font-size:20px}

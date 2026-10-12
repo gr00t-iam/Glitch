@@ -28,6 +28,7 @@ DEFAULTS = {
     'proxy_model': '', 'full_access': False, 'parallel_streams': 1,
     'wake_word_enabled': False, 'announce_completed_tasks': False,
     'speech_voice_id': '', 'speech_volume': 80, 'speech_rate': 0,
+    'github_author_name': '', 'github_author_email': '',
 }
 
 
@@ -261,6 +262,14 @@ class Store:
     def save_settings(self, update):
         current = self.settings()
         values = {k: update.get(k, current[k]) for k in DEFAULTS}
+        for key in ('github_author_name', 'github_author_email'):
+            value = values[key]
+            if (not isinstance(value, str) or len(value) > 200 or
+                    any(ord(c) < 32 or c in '<>' for c in value)):
+                raise ValueError('Git author identity must be bounded text without control characters or angle brackets.')
+            values[key] = value.strip()
+        if values['github_author_email'] and not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', values['github_author_email']):
+            raise ValueError('Enter a valid Git author email address.')
         if values['mode'] not in ('local', 'hybrid'):
             raise ValueError('Choose local or hybrid mode.')
         if values['gpu_mode'] not in ('auto', 'cuda', 'cpu'):

@@ -31,7 +31,7 @@
 </div>
 <dialog id="settings-dialog">
   <div class="dialog-header"><div><h2>Settings &amp; connections</h2><p class="muted">Give Glitch the right tools for your project.</p></div><button id="settings-close" aria-label="Close settings">×</button></div>
-  <div class="settings-tabs" role="tablist"><button id="tab-models" role="tab" aria-selected="true" data-tab="models">Model Manager</button><button id="tab-supervisor" role="tab" aria-selected="false" data-tab="supervisor">Supervision</button><button id="tab-discord" role="tab" aria-selected="false" data-tab="discord">Discord control</button><button id="tab-tools" role="tab" aria-selected="false" data-tab="tools">Computer &amp; safety</button><button id="tab-voice" role="tab" aria-selected="false" data-tab="voice">Voice</button><button id="tab-vault" role="tab" aria-selected="false" data-tab="vault">Vault</button></div>
+  <div class="settings-tabs" role="tablist"><button id="tab-models" role="tab" aria-selected="true" data-tab="models">Model Manager</button><button id="tab-supervisor" role="tab" aria-selected="false" data-tab="supervisor">Supervision</button><button id="tab-discord" role="tab" aria-selected="false" data-tab="discord">Discord control</button><button id="tab-tools" role="tab" aria-selected="false" data-tab="tools">Computer &amp; safety</button><button id="tab-voice" role="tab" aria-selected="false" data-tab="voice">Voice</button><button id="tab-vault" role="tab" aria-selected="false" data-tab="vault">Vault</button><button id="tab-github" role="tab" aria-selected="false" data-tab="github">GitHub</button></div>
   <form id="settings-form">
     <section id="settings-models" role="tabpanel" aria-labelledby="tab-models">
       <h3>A brain of your own</h3><p class="muted">Glitch runs GGUF models directly on your NVIDIA GPU or CPU. No separate model server is needed.</p>
@@ -101,6 +101,32 @@
         <div class="connection-actions"><button id="vault-save" class="primary" type="button">Add credential</button><button id="vault-cancel" type="button" hidden>Cancel update</button></div>
       </fieldset>
       <p id="vault-result" class="muted" role="status" aria-live="polite"></p>
+    </section>
+    <section id="settings-github" role="tabpanel" aria-labelledby="tab-github" hidden>
+      <h3>GitHub connections</h3>
+      <p id="github-lock" class="notice" hidden>Stop all active tasks before changing GitHub connections.</p>
+      <fieldset id="github-fields">
+        <label>Saved GitHub credential<select id="github-credential"><option value="">Select a saved token</option></select></label>
+        <details><summary>Add a GitHub token</summary>
+          <label>Credential name<input id="github-name" maxlength="120" autocomplete="off"></label>
+          <label>Fine-grained personal access token<input id="github-token" type="password" maxlength="16384" autocomplete="new-password" spellcheck="false"></label>
+          <button id="github-save-token" type="button">Save token securely</button>
+        </details>
+        <div class="connection-actions"><button id="github-load-repos" type="button">Load repositories</button></div>
+        <label>Repository<select id="github-repository"><option value="">Select a repository or enter its name below</option></select></label>
+        <div class="field-grid"><label>Owner<input id="github-owner" maxlength="39" autocomplete="off"></label><label>Repository name<input id="github-repo" maxlength="100" autocomplete="off"></label></div>
+        <button id="github-validate" type="button">Validate connection</button>
+        <p id="github-account" class="muted" aria-live="polite">Account not validated</p>
+        <p id="github-permissions" class="notice" aria-live="polite">Read, Contents write and Pull requests write are unverified.</p>
+        <div class="connection-actions"><button id="github-directory" type="button">Choose clone parent folder</button><span id="github-parent" class="muted">No folder selected</span></div>
+        <label>New clone directory<input id="github-folder" maxlength="100" autocomplete="off"></label>
+        <button id="github-clone" class="primary" type="button" disabled>Clone repository</button>
+        <h3>Git author identity</h3>
+        <div class="field-grid"><label>Name<input id="github-author-name" maxlength="200" autocomplete="off"></label><label>Email<input id="github-author-email" type="email" maxlength="200" autocomplete="off"></label></div>
+        <button id="github-save-author" type="button">Save author identity</button>
+      </fieldset>
+      <div class="connection-actions"><button id="github-cancel" type="button" disabled>Cancel GitHub operation</button></div>
+      <p id="github-result" class="muted" role="status" aria-live="polite"></p>
     </section>
     <div class="dialog-footer"><span id="save-result" class="muted" aria-live="polite"></span><button id="settings-save" class="primary" type="submit" disabled>Save settings</button></div>
   </form>

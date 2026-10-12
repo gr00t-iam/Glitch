@@ -97,6 +97,13 @@ VIEW = fields(session=OPAQUE, kind=enum('chat', 'timeline'), watermark=OPAQUE)
 DESCRIPTOR = fields('name', 'origin', 'saved', id=OPAQUE, created_at=OPAQUE, updated_at=OPAQUE,
                     kind=enum('bearer', 'github', 'basic', 'browser', 'proxmox'),
                     tls=fields('verify', 'custom_ca'))
+GITHUB_REPOSITORY = fields('owner', 'name', 'full_name', 'private', 'default_branch', 'url')
+GITHUB_RESULT = fields('ok', 'error', 'message', 'workspace', 'head', 'diff', 'truncated',
+                       credential_id=OPAQUE, repository=GITHUB_REPOSITORY,
+                       account=fields('login', id=OPAQUE),
+                       permissions=fields('read_verified', 'contents_write', 'pull_requests_write'),
+                       staged=fields(add=[None], delete=[None], modify=[None]),
+                       unstaged=[None], untracked=[None], session=SESSION)
 RUN_STATUS = enum('running', 'waiting', 'needs_approval', 'interrupted', 'completed', 'stopped', 'paused')
 RESULT = fields('ok', 'error', 'denied', 'content', 'value', 'output', 'diff', 'path', 'url',
                 'truncated', 'bytes', 'exit_code', 'timed_out', 'duration_ms', 'width', 'height', 'absolute_path', 'sha256',
@@ -229,6 +236,10 @@ BOOTSTRAP = fields('initialized', 'recovery_required', 'message', settings=setti
 OK = fields('ok', 'message')
 BRIDGE = {
     'bootstrap': BOOTSTRAP, 'vault_save': DESCRIPTOR, 'vault_delete': OK,
+    'github_validate': GITHUB_RESULT, 'github_repositories': [GITHUB_REPOSITORY],
+    'github_clone': GITHUB_RESULT, 'github_cancel': OK, 'github_choose_directory': fields('path'),
+    'github_reset_cancel': OK,
+    'github_save_author': settings,
     'choose_workspace': SESSION, 'new_conversation': SESSION,
     'load_conversation': fields(messages=[MESSAGE], events=[event], chat_event_watermark=OPAQUE),
     'projects': [PROJECT], 'clear_view': VIEW,

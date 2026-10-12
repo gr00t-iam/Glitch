@@ -1,6 +1,7 @@
 """Narrow native bridge exposed only to the bundled application page."""
 
 import threading
+from contextlib import contextmanager
 from functools import wraps
 from glitch.redaction import BRIDGE
 
@@ -12,6 +13,8 @@ def _redacted_bridge(cls):
         def invoke(self, *args, **kwargs):
             try:
                 if method.__name__ in ('send', 'spawn_agent', 'save_settings'):
+                    if self._github_busy:
+                        raise ValueError('Wait for or cancel the GitHub operation before submitting tasks or settings.')
                     with self._engine.lock:
                         self._require_initialized()
                         result = method(self, *args, **kwargs)
@@ -45,6 +48,11 @@ class DesktopAPI:
         self._speech = None
         self._voice_session = None
         self._recovery_required = False
+        self._github = None
+        self._github_parent = None
+        self._github_busy = False
+        self._github_cancel = threading.Event()
+        self._github_operation_lock = threading.Lock()
 
     def bootstrap(self):
         try:
@@ -94,6 +102,89 @@ class DesktopAPI:
             busy = state['running_session'] or state.get('active_sessions') or state.get('approval') or state.get('approvals')
         if busy:
             raise ValueError('Stop all active tasks before changing vault credentials.')
+
+    @contextmanager
+    def _github_operation(self):
+        if not self._github_operation_lock.acquire(blocking=False):
+            raise ValueError('Wait for or cancel the current GitHub operation.')
+        try:
+            # Reserve admission through the operation; Discord/delegated starts use this lock too.
+            # No human approval or model call occurs while it is held. Cancel does not take it.
+            with self._engine.lock:
+                self._require_initialized()
+                self._vault_idle()
+                self._github_busy = True
+                try:
+                    if self._github is None:
+                        from glitch.github_service import GitHubService
+                        self._github = GitHubService(self._store.vault)
+                    yield self._github
+                finally:
+                    self._github_busy = False
+        finally:
+            self._github_operation_lock.release()
+
+    def github_validate(self, credential_id, owner, repo):
+        with self._github_operation() as service:
+            try:
+                return service.validate(credential_id, owner, repo, self._github_cancel)
+            except InterruptedError:
+                return {'ok': False, 'error': 'GitHub operation cancelled.'}
+
+    def github_repositories(self, credential_id):
+        with self._github_operation() as service:
+            return service.repositories(credential_id, self._github_cancel)
+
+    def github_cancel(self):
+        self._github_cancel.set()
+        return {'ok': True}
+
+    def github_reset_cancel(self):
+        if not self._github_operation_lock.acquire(blocking=False):
+            raise ValueError('Wait for the current GitHub operation before starting another.')
+        try:
+            with self._engine.lock:
+                self._require_initialized()
+                self._vault_idle()
+                self._github_cancel.clear()
+            return {'ok': True}
+        finally:
+            self._github_operation_lock.release()
+
+    def github_choose_directory(self):
+        import webview
+        self._require_initialized()
+        with self._picker_lock:
+            selected = self._window.create_file_dialog(webview.FileDialog.FOLDER)
+        self._github_parent = None
+        if not selected:
+            return None
+        from glitch.github_service import no_links
+        with self._engine.lock:
+            self._vault_idle()
+            parent = no_links(selected[0])
+            if not parent.is_dir():
+                raise ValueError('Choose an existing local clone parent directory.')
+            self._github_parent = parent
+        return {'path': str(parent)}
+
+    def github_clone(self, credential_id, owner, repo, folder, confirmed=False):
+        if confirmed is not True or self._github_parent is None:
+            raise ValueError('Choose a native clone parent directory and explicitly confirm the clone.')
+        with self._github_operation() as service:
+            try:
+                result = service.clone(credential_id, owner, repo, self._github_parent, folder, self._github_cancel)
+            except InterruptedError as error:
+                return {'ok': False, 'error': str(error)}
+            if result.get('ok'):
+                result['session'] = self._store.session(self._store.new_session(result['workspace']))
+            return result
+
+    def github_save_author(self, name, email):
+        with self._engine.lock:
+            self._require_initialized()
+            self._vault_idle()
+            return self._store.save_settings({'github_author_name': name, 'github_author_email': email})
 
     def choose_workspace(self):
         import webview

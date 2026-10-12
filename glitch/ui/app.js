@@ -213,6 +213,8 @@ function populateSettings() {
   $('discord-token').placeholder = s.discord_token_saved ? 'Token saved securely — leave blank to keep' : 'Enter Discord bot token';
   $('proxy-token').value = ''; $('clear-proxy').checked = false;
   $('proxy-token').placeholder = s.proxy_token_saved ? 'Bridge key saved securely — leave blank to keep' : 'Optional bridge access key';
+  $('github-author-name').value=s.github_author_name||'';
+  $('github-author-email').value=s.github_author_email||'';
   renderSupervisorMode();
   renderCache();
 }
@@ -244,12 +246,13 @@ $('choose').onclick = () => choose().catch(e => toast(e.message, true)); $('proj
 $('new').onclick = async () => {try {const session = await call('new_conversation', state.session); state.sessions.unshift(session); await selectSession(session.id); status('Glitch is ready');} catch(e){toast(e.message,true);}};
 $('settings-open').onclick = () => {if(state.initialized)populateSettings(); $('settings-dialog').showModal(); if(!state.initialized)$('tab-vault').click(); refreshVault().catch(e=>toast(e.message,true));};
 $('settings-close').onclick = () => {$('settings-dialog').close(); $('supervisor-key').value=''; $('discord-token').value='';};
-$('settings-dialog').addEventListener('close', () => {$('supervisor-key').value=''; $('discord-token').value=''; $('proxy-token').value='';clearVaultFields();});
+$('settings-dialog').addEventListener('close', () => {$('supervisor-key').value=''; $('discord-token').value=''; $('proxy-token').value='';$('github-token').value='';clearVaultFields();});
 $('settings-form').onsubmit = async e => {e.preventDefault(); try {await saveSettings(); $('settings-dialog').close(); toast('Settings saved');} catch(error){toast(error.message,true);}};
 document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => {
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b === button)));
-  ['models','supervisor','discord','tools','voice','vault'].forEach(name => $('settings-'+name).hidden = name !== button.dataset.tab);
+  ['models','supervisor','discord','tools','voice','vault','github'].forEach(name => $('settings-'+name).hidden = name !== button.dataset.tab);
   if (button.dataset.tab === 'vault') refreshVault().catch(e=>toast(e.message,true));
+  if (button.dataset.tab === 'github') refreshVault().catch(e=>toast(e.message,true));
 });
 function clearVaultFields() {
   for (const id of ['vault-secret','vault-username','vault-ca']) $(id).value='';
@@ -268,10 +271,11 @@ function resetVaultEditor() {
   vaultKindChanged();updateVaultGate();
 }
 function updateVaultGate() {
-  const runtime=state.runtime||{},locked=!!runtime.running_session||!!runtime.active_sessions?.length||!!state.submitting;
+  const runtime=state.runtime||{},locked=!!runtime.running_session||!!runtime.active_sessions?.length||!!state.submitting||!!state.githubBusy;
   $('vault-lock').hidden=!locked;
   $('vault-fields').disabled=locked||!!state.vaultBusy;
   document.querySelectorAll('[data-vault-edit],[data-vault-delete]').forEach(button=>button.disabled=locked||!!state.vaultBusy);
+  updateGitHubGate();
 }
 function renderVault() {
   $('vault-list').replaceChildren();
@@ -289,7 +293,7 @@ function renderVault() {
   }
   updateVaultGate();
 }
-async function refreshVault() {state.vault=await call('vault_list');renderVault();}
+async function refreshVault() {state.vault=await call('vault_list');renderVault();renderGitHubCredentials();}
 $('vault-kind').onchange=vaultKindChanged;
 $('vault-trust').onchange=()=>{$('vault-ca-row').hidden=$('vault-trust').value!=='custom';$('vault-ca').value='';};
 $('vault-cancel').onclick=()=>{resetVaultEditor();$('vault-result').textContent='';};
@@ -303,6 +307,101 @@ $('vault-save').onclick=async()=>{
   catch(e){$('vault-result').textContent=e.message;}
   finally{clearVaultFields();state.vaultBusy=false;updateVaultGate();}
 };
+
+function githubSelection() {
+  return [$('github-credential').value,$('github-owner').value.trim(),$('github-repo').value.trim()];
+}
+function invalidateGitHub() {
+  state.githubValidated=null;
+  $('github-account').textContent='Account not validated';
+  $('github-permissions').textContent='Read, Contents write and Pull requests write are unverified.';
+  updateGitHubGate();
+}
+function renderGitHubCredentials() {
+  const selected=$('github-credential').value;
+  $('github-credential').replaceChildren(new Option('Select a saved token',''));
+  for(const item of state.vault||[])if(item.kind==='github'&&item.origin==='https://github.com')
+    $('github-credential').add(new Option(`${item.name} (Saved)`,item.id));
+  if(Array.from($('github-credential').options).some(item=>item.value===selected))$('github-credential').value=selected;
+  if($('github-credential').value!==selected)invalidateGitHub();
+  updateGitHubGate();
+}
+function updateGitHubGate() {
+  const runtime=state.runtime||{};
+  const locked=!state.initialized||!!runtime.running_session||!!runtime.active_sessions?.length||
+    !!runtime.approval||!!runtime.approvals?.length||!!state.submitting;
+  $('github-lock').hidden=!locked;
+  $('github-fields').disabled=locked||!!state.githubBusy;
+  $('github-cancel').disabled=!state.githubBusy||!state.githubCancellable;
+  $('github-clone').disabled=locked||!!state.githubBusy||!state.githubParent||
+    state.githubValidated!==JSON.stringify(githubSelection())||!$('github-folder').value.trim();
+}
+async function githubAction(action) {
+  if(state.githubBusy)return;
+  state.githubBusy=true;state.githubCancellable=false;updateVaultGate();
+  $('github-result').textContent='Working...';
+  try {
+    await call('github_reset_cancel');state.githubCancellable=true;updateGitHubGate();await action();
+  } catch(e){$('github-result').textContent=e.message;}
+  finally {state.githubBusy=false;state.githubCancellable=false;updateVaultGate();}
+}
+$('github-credential').onchange=()=>{
+  $('github-repository').replaceChildren(new Option('Select a repository or enter its name below',''));
+  invalidateGitHub();
+};
+for(const id of ['github-owner','github-repo'])$(id).oninput=invalidateGitHub;
+$('github-folder').oninput=updateGitHubGate;
+$('github-repository').onchange=()=>{
+  const value=$('github-repository').value.split('/');
+  if(value.length===2){$('github-owner').value=value[0];$('github-repo').value=value[1];$('github-folder').value=value[1];}
+  invalidateGitHub();
+};
+$('github-save-token').onclick=()=>githubAction(async()=>{
+  try {
+    const item=await call('vault_save',$('github-name').value.trim(),'github','https://github.com',{token:$('github-token').value});
+    await refreshVault();$('github-credential').value=item.id;$('github-name').value='';invalidateGitHub();
+    document.querySelector('#github-fields details').open=false;
+    $('github-result').textContent='Token saved securely';
+  } finally {$('github-token').value='';}
+});
+$('github-load-repos').onclick=()=>githubAction(async()=>{
+  const repositories=await call('github_repositories',$('github-credential').value);
+  $('github-repository').replaceChildren(new Option('Select a repository or enter its name below',''));
+  for(const repo of repositories)$('github-repository').add(new Option(repo.full_name,repo.full_name));
+  $('github-result').textContent=`${repositories.length} repositories available`;
+});
+$('github-validate').onclick=()=>githubAction(async()=>{
+  invalidateGitHub();
+  const selection=githubSelection(),result=await call('github_validate',...selection);
+  if(!result.ok){$('github-result').textContent=result.error;return;}
+  state.githubValidated=JSON.stringify(selection);
+  $('github-account').textContent=`Account: ${result.account.login}`;
+  $('github-permissions').textContent=result.permissions.contents_write===null?
+    'Repository read verified. Contents write and Pull requests write remain unverified.':result.message;
+  $('github-result').textContent=result.message;
+});
+$('github-directory').onclick=()=>githubAction(async()=>{
+  const result=await call('github_choose_directory');
+  state.githubParent=result?.path||null;$('github-parent').textContent=state.githubParent||'No folder selected';
+  $('github-result').textContent=result?'Clone parent selected':'Folder selection cancelled';
+});
+$('github-clone').onclick=()=>{
+  const selection=githubSelection(),folder=$('github-folder').value.trim();
+  if(state.githubValidated!==JSON.stringify(selection)||!state.githubParent)return;
+  if(!confirm(`Clone ${selection[1]}/${selection[2]} into a new directory "${folder}" under ${state.githubParent}? Existing files will not be overwritten.`))return;
+  githubAction(async()=>{
+    const result=await call('github_clone',...selection,folder,true);
+    if(!result.ok){$('github-result').textContent=result.error;return;}
+    state.sessions.unshift(result.session);state.projects=await call('projects');await selectSession(result.session.id);
+    $('github-result').textContent=`Cloned ${selection[1]}/${selection[2]}`;
+    state.githubParent=null;$('github-parent').textContent='No folder selected';
+  });
+};
+$('github-cancel').onclick=async()=>{try{await call('github_cancel');if(state.githubBusy)$('github-result').textContent='Cancellation requested';}catch(e){$('github-result').textContent=e.message;}};
+$('github-save-author').onclick=()=>githubAction(async()=>{
+  updateSettings(await call('github_save_author',$('github-author-name').value.trim(),$('github-author-email').value.trim()));
+  $('github-result').textContent='Author identity saved locally';
+});
 function renderSupervisorMode() {
   const proxy = $('supervisor-auth').value === 'proxy';
   $('api-fields').hidden = proxy; $('proxy-fields').hidden = !proxy;
