@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-def run(output_directory):
+def run(output_directory, validation_only=False):
     import webview
     from dulwich.client import LocalGitClient
     from dulwich.config import StackedConfig
@@ -81,6 +81,49 @@ def run(output_directory):
                 wait_for('state.initialized && state.ready')
                 window.evaluate_js("window.githubErrors=[];addEventListener('error',e=>githubErrors.push(e.message));document.getElementById('settings-open').click();document.getElementById('tab-github').click()")
                 wait_for("!document.getElementById('settings-github').hidden")
+                if validation_only:
+                    item = store.vault.save('Validation fixture', 'github', 'https://github.com',
+                                            {'token': 'synthetic-validation-old-ONLY'})
+                    phase['denied'] = False
+                    window.evaluate_js('poll=async()=>{}')
+                    def validate():
+                        window.evaluate_js("document.getElementById('tab-github').click()")
+                        wait_for(f"Array.from(document.getElementById('github-credential').options).some(o=>o.value==='{item['id']}')")
+                        window.evaluate_js(f"document.getElementById('github-credential').value='{item['id']}';document.getElementById('github-credential').dispatchEvent(new Event('change'));document.getElementById('github-owner').value='fixture';document.getElementById('github-repo').value='sample';document.getElementById('github-folder').value='sample';state.githubParent='C:/synthetic-parent';document.getElementById('github-validate').click()")
+                        wait_for("!state.githubBusy && !!state.githubValidated")
+                        assert window.evaluate_js("!document.getElementById('github-clone').disabled && document.getElementById('github-account').textContent==='Account: fixture'")
+                    def invalidated():
+                        return window.evaluate_js("!state.githubValidated && document.getElementById('github-clone').disabled && document.getElementById('github-account').textContent==='Account not validated' && document.getElementById('github-permissions').textContent==='Read, Contents write and Pull requests write are unverified.'")
+                    validate()
+                    # Force equal descriptor timestamps to exercise explicit in-place invalidation.
+                    window.evaluate_js(f"window.validationActualCall=call;window.validationTimestamp=state.vault.find(i=>i.id==='{item['id']}').updated_at;call=async(method,...args)=>{{const result=await validationActualCall(method,...args);if(method==='vault_list')for(const item of result)item.updated_at=validationTimestamp;return result;}}")
+                    window.evaluate_js("document.getElementById('tab-vault').click()")
+                    wait_for(f"!!document.querySelector('[data-vault-edit=\"{item['id']}\"]')")
+                    window.evaluate_js(f"document.querySelector('[data-vault-edit=\"{item['id']}\"]').click();document.getElementById('vault-secret').value='synthetic-validation-new-ONLY';document.getElementById('vault-save').click()")
+                    wait_for("!state.vaultBusy && document.getElementById('vault-result').textContent==='Updated securely'")
+                    assert store.vault.list()[0]['id'] == item['id']
+                    assert store.vault.resolve(item['id'], 'https://github.com')['token'] == 'synthetic-validation-new-ONLY'
+                    assert invalidated(), 'Same-ID token replacement retained prior read/account validation or clone eligibility'
+                    assert window.evaluate_js(f"state.vault.find(i=>i.id==='{item['id']}').updated_at===validationTimestamp")
+                    window.evaluate_js('call=validationActualCall')
+                    result['checks'].append('Actual same-ID Vault replacement clears account/read evidence and clone eligibility')
+                    validate()
+                    window.evaluate_js(f"state.vault.find(i=>i.id==='{item['id']}').updated_at='synthetic-new-version';renderGitHubCredentials()")
+                    assert invalidated(), 'Same-ID descriptor version refresh retained prior validation'
+                    result['checks'].append('Same-ID descriptor version change also clears validation')
+                    validate()
+                    window.evaluate_js("document.getElementById('github-credential').value='';document.getElementById('github-credential').dispatchEvent(new Event('change'))")
+                    assert invalidated(), 'Credential selection change retained prior validation'
+                    result['checks'].append('Changing the selected credential clears validation')
+                    validate()
+                    window.evaluate_js("state.vault=[];renderGitHubCredentials()")
+                    assert invalidated(), 'Deleting selected credential retained prior validation'
+                    result['checks'].append('Deleted credential descriptor clears validation')
+                    window.evaluate_js("document.getElementById('tab-github').click()")
+                    capture('github-validation-invalidated.png')
+                    assert not window.evaluate_js('githubErrors'), 'Validation fixture recorded page errors'
+                    result['passed'] = True
+                    return
                 assert window.evaluate_js("document.title==='Glitch' && document.getElementById('github-token').type==='password'")
                 window.evaluate_js("document.querySelector('#github-fields details').open=true;document.getElementById('github-name').value='Native GitHub fixture';document.getElementById('github-token').value='synthetic-native-github-ONLY';document.getElementById('github-save-token').click()")
                 wait_for("document.getElementById('github-result').textContent==='Token saved securely'")
@@ -153,6 +196,8 @@ def run(output_directory):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('output_directory')
-    evidence = run(parser.parse_args().output_directory)
+    parser.add_argument('--validation-only', action='store_true')
+    args = parser.parse_args()
+    evidence = run(args.output_directory, args.validation_only)
     print(json.dumps(evidence, indent=2))
     raise SystemExit(0 if evidence['passed'] else 1)

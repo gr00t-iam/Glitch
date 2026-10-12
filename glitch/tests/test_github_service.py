@@ -1,5 +1,6 @@
 """Temporary repositories and synthetic tokens only; no live GitHub requests."""
 import json
+import difflib
 import os
 import ssl
 import shutil
@@ -253,6 +254,98 @@ class GitHubTests(unittest.TestCase):
         self.assertIn('Mode changed', self.service.diff(checkout, ['hello.txt'])['diff'])
         (checkout / 'empty.txt').unlink()
         self.assertIn('Deleted empty file', self.service.diff(checkout, ['empty.txt'])['diff'])
+
+    def test_diff_redacts_complete_source_before_output_cap_crosses_secret(self):
+        from glitch.github_service import MAX_DIFF_BYTES
+        checkout = Path(self.clone()['workspace'])
+        header = ''.join(difflib.unified_diff([], ['x\n'], 'a/cap.txt (working)', 'b/cap.txt (working)'))
+        prefix_size = header.index('+x\n') + 1
+        text = 'a' * (MAX_DIFF_BYTES - prefix_size - 14) + fixtures.SYNTHETIC + 'tail\n'
+        (checkout / 'cap.txt').write_bytes(text.encode())
+        preview = self.service.diff(checkout, ['cap.txt'])
+        self.assertTrue(preview['truncated'])
+        self.assertLessEqual(len(preview['diff'].encode()), MAX_DIFF_BYTES)
+        self.assertTrue('synthetic-' not in preview['diff'], 'A saved credential prefix crossed the output cap.')
+        safe_text = self.vault.redact(text)
+        expected = ''.join(difflib.unified_diff([], safe_text.splitlines(True),
+                           'a/cap.txt (working)', 'b/cap.txt (working)')).encode()[:MAX_DIFF_BYTES].decode()
+        self.assertTrue(preview['diff'] == expected, 'The cap must apply only to protected display text.')
+
+    def test_diff_redacts_multiline_source_before_segmentation_and_markers(self):
+        secret = 'synthetic-fragment-FIRST\nsynthetic-fragment-SECOND'
+        with patch('glitch.storage.protect', side_effect=fixtures.fixture_cipher):
+            self.store.save_settings({'supervisor_key': secret})
+            self.assertEqual(self.store.supervisor_key(), secret)
+            self.assertEqual(self.vault.redact(secret), '[credential removed]')
+            with Repo(self.source) as repo:
+                self.commit(repo, {'multiline.txt': (secret + '\nold public\n').encode()})
+            checkout = Path(self.clone()['workspace'])
+            (checkout / 'multiline.txt').write_bytes((secret + '\nnew public\n').encode())
+            # Redaction must already have happened when data reaches difflib.
+            original_diff = difflib.unified_diff
+            inputs = []
+            def protected_diff(a, b, *args, **kwargs):
+                inputs.append(''.join(a) + ''.join(b))
+                return original_diff(a, b, *args, **kwargs)
+            with patch('glitch.github_service.difflib.unified_diff', side_effect=protected_diff):
+                preview = self.service.diff(checkout, ['multiline.txt'])
+            self.assertTrue(inputs)
+            self.assertNotIn('synthetic-fragment', ''.join(inputs))
+            self.assertIn('[credential removed]', preview['diff'])
+            self.assertNotIn('synthetic-fragment', preview['diff'])
+            self.assertIn('-old public', preview['diff'])
+            self.assertIn('+new public', preview['diff'])
+
+    def test_diff_tracks_original_bytes_when_redacted_display_is_equal(self):
+        self.vault.save('Other synthetic token', 'github', 'https://github.com',
+                        {'token': 'synthetic-alternate-fixture-ONLY'})
+        self.vault.save('Third synthetic token', 'github', 'https://github.com',
+                        {'token': 'synthetic-third-fixture-ONLY'})
+        with Repo(self.source) as repo:
+            self.commit(repo, {'hello.txt': fixtures.SYNTHETIC.encode() + b'\n'})
+        checkout = Path(self.clone()['workspace'])
+        with Repo(checkout) as repo:
+            blob = Blob.from_string(b'synthetic-alternate-fixture-ONLY\n')
+            repo.object_store.add_object(blob)
+            index = repo.open_index(config=ConfigFile())
+            index[b'hello.txt'].sha = blob.id
+            index.write()
+        (checkout / 'hello.txt').write_bytes(b'synthetic-third-fixture-ONLY\n')
+        preview = self.service.diff(checkout, ['hello.txt'])
+        self.assertIn('Protected content differs (staged)', preview['diff'])
+        self.assertIn('Protected content differs (working)', preview['diff'])
+        self.assertNotIn('synthetic-', preview['diff'])
+
+    def test_diff_reports_distinct_invalid_utf8_for_staged_and_working_bytes(self):
+        with Repo(self.source) as repo:
+            self.commit(repo, {'invalid.txt': b'\xff\n'})
+        checkout = Path(self.clone()['workspace'])
+        with Repo(checkout) as repo:
+            blob = Blob.from_string(b'\xfe\n')
+            repo.object_store.add_object(blob)
+            index = repo.open_index(config=ConfigFile())
+            index[b'invalid.txt'].sha = blob.id
+            index.write()
+        (checkout / 'invalid.txt').write_bytes(b'\xfd\n')
+        status = self.service.status(checkout)
+        self.assertIn('invalid.txt', status['staged']['modify'])
+        self.assertIn('invalid.txt', status['unstaged'])
+        preview = self.service.diff(checkout, ['invalid.txt'])
+        self.assertIn('Binary/non-UTF-8 file differs (staged)', preview['diff'])
+        self.assertIn('Binary/non-UTF-8 file differs (working)', preview['diff'])
+        self.assertNotIn('\ufffd', preview['diff'])
+        self.assertFalse(preview['truncated'])
+
+    def test_diff_separates_unterminated_removed_and_added_lines(self):
+        with Repo(self.source) as repo:
+            self.commit(repo, {'plain.txt': b'old'})
+        checkout = Path(self.clone()['workspace'])
+        (checkout / 'plain.txt').write_bytes(b'new')
+        preview = self.service.diff(checkout, ['plain.txt'])
+        self.assertIn('-old\n\\ No newline at end of file\n', preview['diff'])
+        self.assertIn('+new\n\\ No newline at end of file\n', preview['diff'])
+        self.assertNotIn('-old+new', preview['diff'])
+        self.assertEqual(preview['diff'].count('\\ No newline at end of file'), 2)
 
     def test_clone_checkout_casefold_directory_collisions(self):
         with Repo(self.source) as repo:

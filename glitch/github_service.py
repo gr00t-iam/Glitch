@@ -644,6 +644,7 @@ class GitHubService:
                     return obj.data
                 for name in dict.fromkeys(paths):
                     check(cancel, deadline)
+                    display_name = self.vault.redact(name)
                     path = no_links(root.joinpath(*file_path(name)))
                     if path.is_dir():
                         raise ValueError('Select explicit files, not directories.')
@@ -651,7 +652,7 @@ class GitHubService:
                         before, indexed = blob(original.get(name)), blob(staged.get(name))
                         current = bounded_read(path, MAX_FILE_BYTES) if path.exists() else b''
                     except ValueError:
-                        lines = [f'File omitted (size limit): {name}\n']
+                        lines = [f'File omitted (size limit): {display_name}\n']
                         truncated = True
                     else:
                         total += len(before) + len(indexed) + len(current)
@@ -666,35 +667,50 @@ class GitHubService:
                                 ('working', indexed, current, index_entry, working_entry)]:
                             if a == b:
                                 if old_entry is None and new_entry is not None:
-                                    lines.append(f'New empty file ({label}): {name}\n')
+                                    lines.append(f'New empty file ({label}): {display_name}\n')
                                 elif old_entry is not None and new_entry is None:
-                                    lines.append(f'Deleted empty file ({label}): {name}\n')
+                                    lines.append(f'Deleted empty file ({label}): {display_name}\n')
                                 elif old_entry is not None and new_entry is not None and old_entry[1] != new_entry[1]:
-                                    lines.append(f'Mode changed ({label}): {name}\n')
+                                    lines.append(f'Mode changed ({label}): {display_name}\n')
                                 continue
                             if b'\0' in a or b'\0' in b:
-                                lines.append(f'Binary file differs ({label}): {name}\n')
+                                lines.append(f'Binary file differs ({label}): {display_name}\n')
                             elif len(a) + len(b) > 256 * 1024 or a.count(b'\n') + b.count(b'\n') > 2000:
-                                lines.append(f'Diff omitted (byte/line work limit, {label}): {name}\n')
+                                lines.append(f'Diff omitted (byte/line work limit, {label}): {display_name}\n')
                                 truncated = True
                             else:
-                                lines.extend(difflib.unified_diff(a.decode('utf-8', 'replace').splitlines(True),
-                                    b.decode('utf-8', 'replace').splitlines(True), f'a/{name} ({label})', f'b/{name} ({label})'))
+                                try:
+                                    text_a, text_b = a.decode('utf-8'), b.decode('utf-8')
+                                except UnicodeDecodeError:
+                                    lines.append(f'Binary/non-UTF-8 file differs ({label}): {display_name}\n')
+                                    continue
+                                # Protect complete source values before splitting or inserting diff markers.
+                                text_a, text_b = self.vault.redact(text_a), self.vault.redact(text_b)
+                                if text_a == text_b:
+                                    lines.append(f'Protected content differs ({label}): {display_name}\n')
+                                    continue
+                                if (len(text_a.encode()) + len(text_b.encode()) > 256 * 1024 or
+                                        text_a.count('\n') + text_b.count('\n') > 2000):
+                                    lines.append(f'Diff omitted (protected text work limit, {label}): {display_name}\n')
+                                    truncated = True
+                                    continue
+                                for line in difflib.unified_diff(text_a.splitlines(True), text_b.splitlines(True),
+                                        f'a/{display_name} ({label})', f'b/{display_name} ({label})'):
+                                    if line.endswith('\n'):
+                                        lines.append(line.removesuffix('\n').removesuffix('\r') + '\n')
+                                    else:
+                                        lines.extend([line + '\n', '\\ No newline at end of file\n'])
                     for line in lines:
                         check(cancel, deadline)
-                        encoded = line.encode('utf-8')
-                        remaining = MAX_DIFF_BYTES - used
-                        if len(encoded) > remaining:
-                            output.append(encoded[:remaining].decode('utf-8', 'ignore'))
-                            truncated = True
-                            used = MAX_DIFF_BYTES
-                            break
                         output.append(line)
-                        used += len(encoded)
+                        used += len(line.encode('utf-8'))
+                        if used >= MAX_DIFF_BYTES:
+                            break
                     if used >= MAX_DIFF_BYTES:
                         truncated = True
                         break
                 result = self.vault.redact({'ok': True, 'diff': ''.join(output), 'truncated': truncated}, GITHUB_RESULT)
+                # The only byte cap applies after complete display records have been redacted.
                 if len(result['diff'].encode()) > MAX_DIFF_BYTES:
                     result['diff'] = result['diff'].encode()[:MAX_DIFF_BYTES].decode('utf-8', 'ignore')
                     result['truncated'] = True

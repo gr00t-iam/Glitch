@@ -288,7 +288,7 @@ function renderVault() {
     const edit=document.createElement('button');edit.type='button';edit.textContent='Update';edit.dataset.vaultEdit=item.id;
     edit.onclick=()=>{resetVaultEditor();state.vaultEditing=item.id;$('vault-name').value=item.name;$('vault-kind').value=item.kind;vaultKindChanged();$('vault-origin').value=item.origin;$('vault-trust').value=item.tls.custom_ca?'custom':'system';$('vault-ca-row').hidden=!item.tls.custom_ca;$('vault-heading').textContent='Update credential';$('vault-save').textContent='Update credential';$('vault-cancel').hidden=false;$('vault-result').textContent='Enter replacement values';$('vault-secret').focus();};
     const remove=document.createElement('button');remove.type='button';remove.textContent='Delete';remove.dataset.vaultDelete=item.id;
-    remove.onclick=async()=>{if(!confirm(`Delete credential "${item.name}"?`))return;state.vaultBusy=true;updateVaultGate();try{await call('vault_delete',item.id);if(state.vaultEditing===item.id)resetVaultEditor();await refreshVault();if(!state.initialized)await initialize();$('vault-result').textContent='Credential deleted';}catch(e){$('vault-result').textContent=e.message;}finally{state.vaultBusy=false;updateVaultGate();}};
+    remove.onclick=async()=>{if(!confirm(`Delete credential "${item.name}"?`))return;state.vaultBusy=true;updateVaultGate();try{await call('vault_delete',item.id);if(item.id===$('github-credential').value)invalidateGitHub();if(state.vaultEditing===item.id)resetVaultEditor();await refreshVault();if(!state.initialized)await initialize();$('vault-result').textContent='Credential deleted';}catch(e){$('vault-result').textContent=e.message;}finally{state.vaultBusy=false;updateVaultGate();}};
     row.append(name,detail,saved,edit,remove);$('vault-list').append(row);
   }
   updateVaultGate();
@@ -303,7 +303,7 @@ $('vault-save').onclick=async()=>{
   const payload=kind==='proxmox'?{token_id:$('vault-username').value,secret:$('vault-secret').value}:['basic','browser'].includes(kind)?{username:$('vault-username').value,password:$('vault-secret').value}:{token:$('vault-secret').value};
   if($('vault-trust').value==='custom')payload.ca_pem=$('vault-ca').value;
   state.vaultBusy=true;updateVaultGate();
-  try {await call('vault_save',$('vault-name').value.trim(),kind,$('vault-origin').value.trim(),payload,identifier);resetVaultEditor();await refreshVault();if(!state.initialized)await initialize();$('vault-result').textContent=identifier?'Updated securely':'Saved securely';}
+  try {await call('vault_save',$('vault-name').value.trim(),kind,$('vault-origin').value.trim(),payload,identifier);if(identifier===$('github-credential').value)invalidateGitHub();resetVaultEditor();await refreshVault();if(!state.initialized)await initialize();$('vault-result').textContent=identifier?'Updated securely':'Saved securely';}
   catch(e){$('vault-result').textContent=e.message;}
   finally{clearVaultFields();state.vaultBusy=false;updateVaultGate();}
 };
@@ -311,8 +311,14 @@ $('vault-save').onclick=async()=>{
 function githubSelection() {
   return [$('github-credential').value,$('github-owner').value.trim(),$('github-repo').value.trim()];
 }
+function githubCredentialVersion() {
+  const item=(state.vault||[]).find(item=>item.id===$('github-credential').value);
+  return item?JSON.stringify([item.id,item.updated_at,item.kind,item.origin]):null;
+}
 function invalidateGitHub() {
   state.githubValidated=null;
+  state.githubValidatedVersion=null;
+  state.githubValidationGeneration=(state.githubValidationGeneration||0)+1;
   $('github-account').textContent='Account not validated';
   $('github-permissions').textContent='Read, Contents write and Pull requests write are unverified.';
   updateGitHubGate();
@@ -323,7 +329,8 @@ function renderGitHubCredentials() {
   for(const item of state.vault||[])if(item.kind==='github'&&item.origin==='https://github.com')
     $('github-credential').add(new Option(`${item.name} (Saved)`,item.id));
   if(Array.from($('github-credential').options).some(item=>item.value===selected))$('github-credential').value=selected;
-  if($('github-credential').value!==selected)invalidateGitHub();
+  if($('github-credential').value!==selected||
+    (state.githubValidated&&state.githubValidatedVersion!==githubCredentialVersion()))invalidateGitHub();
   updateGitHubGate();
 }
 function updateGitHubGate() {
@@ -334,7 +341,8 @@ function updateGitHubGate() {
   $('github-fields').disabled=locked||!!state.githubBusy;
   $('github-cancel').disabled=!state.githubBusy||!state.githubCancellable;
   $('github-clone').disabled=locked||!!state.githubBusy||!state.githubParent||
-    state.githubValidated!==JSON.stringify(githubSelection())||!$('github-folder').value.trim();
+    state.githubValidated!==JSON.stringify(githubSelection())||
+    state.githubValidatedVersion!==githubCredentialVersion()||!$('github-folder').value.trim();
 }
 async function githubAction(action) {
   if(state.githubBusy)return;
@@ -372,9 +380,15 @@ $('github-load-repos').onclick=()=>githubAction(async()=>{
 });
 $('github-validate').onclick=()=>githubAction(async()=>{
   invalidateGitHub();
-  const selection=githubSelection(),result=await call('github_validate',...selection);
+  const selection=githubSelection(),version=githubCredentialVersion(),generation=state.githubValidationGeneration;
+  const result=await call('github_validate',...selection);
   if(!result.ok){$('github-result').textContent=result.error;return;}
+  if(generation!==state.githubValidationGeneration||version!==githubCredentialVersion()||
+    JSON.stringify(selection)!==JSON.stringify(githubSelection())){
+    $('github-result').textContent='Connection changed. Validate again.';return;
+  }
   state.githubValidated=JSON.stringify(selection);
+  state.githubValidatedVersion=version;
   $('github-account').textContent=`Account: ${result.account.login}`;
   $('github-permissions').textContent=result.permissions.contents_write===null?
     'Repository read verified. Contents write and Pull requests write remain unverified.':result.message;
@@ -387,7 +401,7 @@ $('github-directory').onclick=()=>githubAction(async()=>{
 });
 $('github-clone').onclick=()=>{
   const selection=githubSelection(),folder=$('github-folder').value.trim();
-  if(state.githubValidated!==JSON.stringify(selection)||!state.githubParent)return;
+  if(state.githubValidated!==JSON.stringify(selection)||state.githubValidatedVersion!==githubCredentialVersion()||!state.githubParent)return;
   if(!confirm(`Clone ${selection[1]}/${selection[2]} into a new directory "${folder}" under ${state.githubParent}? Existing files will not be overwritten.`))return;
   githubAction(async()=>{
     const result=await call('github_clone',...selection,folder,true);
