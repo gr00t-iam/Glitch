@@ -135,6 +135,19 @@ class DesktopAPI:
         with self._github_operation() as service:
             return service.repositories(credential_id, self._github_cancel)
 
+    def github_bind(self, session, credential_id, owner, repo, confirmed=False):
+        if confirmed is not True:
+            raise ValueError('Explicitly confirm binding the selected project to this GitHub repository.')
+        with self._github_operation() as service:
+            workspace = self._store.session(session)['workspace']
+            return service.bind(workspace, credential_id, owner, repo, self._github_cancel)
+
+    def github_review(self, session, paths):
+        with self._github_operation() as service:
+            workspace = self._store.session(session)['workspace']
+            connection = service.connection(workspace)
+            return service.diff(workspace, paths, cancel=self._github_cancel, connection=connection)
+
     def github_cancel(self):
         self._github_cancel.set()
         return {'ok': True}
@@ -178,6 +191,7 @@ class DesktopAPI:
                 return {'ok': False, 'error': str(error)}
             if result.get('ok'):
                 result['session'] = self._store.session(self._store.new_session(result['workspace']))
+                service.bind(result['workspace'], credential_id, owner, repo, self._github_cancel)
             return result
 
     def github_save_author(self, name, email):

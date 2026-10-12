@@ -10,6 +10,8 @@ from glitch.artifacts import ArtifactEvidence
 from glitch.tools import TOOL_SCHEMAS, WorkspaceTools
 from glitch.computer import COMPUTER_SCHEMAS, ComputerTools
 from glitch.service_tools import SERVICE_SCHEMAS, ServiceTools
+from glitch.github_tools import GITHUB_SCHEMAS, GitHubTools
+from glitch.github_service import GitHubService
 from glitch.resources import SHARED_RESOURCES
 from glitch.context import ContextManager, CONTEXT_SCHEMAS
 from glitch.redaction import MESSAGE, DECISION, RESULT, action as action_schema, event_payload, tool_name, ProtocolText, DESCRIPTOR
@@ -68,10 +70,18 @@ class AgentEngine:
             self.approval_event.set()
 
     def _approve(self, action, payload):
+        if action in {'github_clone_repo', 'github_create_branch', 'github_commit_and_push', 'github_create_pull_request'}:
+            resources = self.coordinator.resources if self.coordinator else SHARED_RESOURCES
+            with resources.human_review(self.cancelled):
+                return self._approve_action(action, payload)
+        return self._approve_action(action, payload)
+
+    def _approve_action(self, action, payload):
         with self.lock:
             if self.cancelled.is_set():
                 return False
-            if self.store.settings().get('full_access') is True:
+            if self.store.settings().get('full_access') is True and action not in {
+                    'github_clone_repo', 'github_create_branch', 'github_commit_and_push', 'github_create_pull_request'}:
                 self._emit('approval_resolved', 'Action allowed by Full Access',
                            {'action': action, 'payload': payload, 'approved': True, 'automatic': True})
                 return True
@@ -124,6 +134,9 @@ class AgentEngine:
             service = ServiceTools(self.store.vault, self._approve, self._emit, self.cancelled)
             service.chrome = computer.chrome
             service.resources = resources
+            github_service = GitHubService(self.store.vault)
+            github_service.resources = resources
+            github = GitHubTools(github_service, workspace, self._approve, self._emit, self.cancelled)
             extra = []
             if self.coordinator and not self.parent_id:
                 from glitch.orchestration import DELEGATION_SCHEMAS
@@ -136,7 +149,8 @@ class AgentEngine:
                     'Return JSON with message (short update or final answer), done (boolean), tool (null when done, otherwise {name,args}). '
                     'Do not claim completion until you have verified the requested change. '
                     'Desktop screenshots use primary-screen native pixels; use a vision-capable model for visual tasks. '
-                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + SERVICE_SCHEMAS + CONTEXT_SCHEMAS + extra))
+                    'GitHub mutations always require explicit destination review, even in Full Access. '
+                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + SERVICE_SCHEMAS + GITHUB_SCHEMAS + CONTEXT_SCHEMAS + extra))
             def system():
                 parts = [base]
                 if self.coordinator:
@@ -202,7 +216,9 @@ class AgentEngine:
                     elif tool['name'] in {t['name'] for t in CONTEXT_SCHEMAS}:
                         result = context.execute(session, tool['args'])
                     else:
-                        if tool['name'] in {t['name'] for t in SERVICE_SCHEMAS}:
+                        if tool['name'] in {t['name'] for t in GITHUB_SCHEMAS}:
+                            executor = github
+                        elif tool['name'] in {t['name'] for t in SERVICE_SCHEMAS}:
                             executor = service
                         elif tool['name'] in {t['name'] for t in COMPUTER_SCHEMAS}:
                             executor = computer

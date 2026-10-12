@@ -182,6 +182,19 @@ function updateRuntime(runtime) {
   const pending = runtime.approval;
   if (pending && state.pending?.id !== pending.id) {
     state.pending = pending; $('approval-title').textContent = pending.action;
+    const repositoryReview=String(pending.action).startsWith('github_'),preview=pending.payload||{};
+    $('repository-review').hidden=!repositoryReview;
+    $('approval-payload').hidden=repositoryReview;
+    if(repositoryReview){
+      $('review-repository').textContent=preview.repository||'';
+      $('review-branch').textContent=preview.branch||[preview.head,preview.base].filter(Boolean).join(' -> ');
+      $('review-head').textContent=[preview.current_head||preview.head,preview.target_head].filter(Boolean).join(' -> ');
+      $('review-fingerprint').textContent=preview.fingerprint||'';
+      $('review-paths').textContent=(preview.paths||[preview.folder]).filter(Boolean).join('\n');
+      $('review-message').textContent=[preview.title,preview.body].filter(Boolean).join('\n\n');
+      $('review-author').textContent=preview.author||'';
+      $('review-diff').textContent=preview.diff||'';
+    }
     $('approval-payload').textContent = JSON.stringify(pending.payload, null, 2);
     if (!$('approval-dialog').open) $('approval-dialog').showModal();
     status('Glitch is waiting for your approval');
@@ -193,7 +206,7 @@ function updateSettings(settings) {
   $('access-mode').classList.toggle('amber', !!settings.full_access);
   $('composer-access-label').textContent = settings.full_access ? 'Full access' : 'Ask before actions';
   $('composer-access').setAttribute('aria-pressed', String(!!settings.full_access));
-  $('access-note').textContent = settings.full_access ? 'Full Access is on. Actions run without approval prompts.' : 'Private by default. Ask before actions is on.';
+  $('access-note').textContent = settings.full_access ? 'Full Access is on. GitHub publishing still requires approval.' : 'Private by default. Ask before actions is on.';
   $('model-label').textContent = settings.worker_model || 'No local model selected';
   $('status-detail').textContent = settings.mode === 'hybrid' ? 'Built-in local worker · Supervisor audits on errors, loops and milestones' : 'Built-in local reasoning · Cloud audits are off';
 }
@@ -343,6 +356,9 @@ function updateGitHubGate() {
   $('github-clone').disabled=locked||!!state.githubBusy||!state.githubParent||
     state.githubValidated!==JSON.stringify(githubSelection())||
     state.githubValidatedVersion!==githubCredentialVersion()||!$('github-folder').value.trim();
+  $('github-bind').disabled=locked||!!state.githubBusy||!state.session||
+    state.githubValidated!==JSON.stringify(githubSelection())||state.githubValidatedVersion!==githubCredentialVersion();
+  $('github-review').disabled=locked||!!state.githubBusy||!state.session;
 }
 async function githubAction(action) {
   if(state.githubBusy)return;
@@ -415,6 +431,22 @@ $('github-cancel').onclick=async()=>{try{await call('github_cancel');if(state.gi
 $('github-save-author').onclick=()=>githubAction(async()=>{
   updateSettings(await call('github_save_author',$('github-author-name').value.trim(),$('github-author-email').value.trim()));
   $('github-result').textContent='Author identity saved locally';
+});
+$('github-bind').onclick=()=>{
+  if(!state.session||$('github-bind').disabled)return;
+  const selection=githubSelection(),session=state.sessions.find(item=>item.id===state.session);
+  if(!confirm(`Bind ${session?.workspace||'the selected project'} to ${selection[1]}/${selection[2]}? GitHub publishing will use only this repository and saved credential.`))return;
+  githubAction(async()=>{
+    const result=await call('github_bind',state.session,...selection,true);
+    $('github-bound-project').textContent=result.ok?`${result.repository.full_name} / ${result.repository.default_branch}`:result.error;
+    $('github-result').textContent=result.ok?'Project connection saved':result.error;
+  });
+};
+$('github-review').onclick=()=>githubAction(async()=>{
+  const paths=$('github-review-paths').value.split(/\r?\n/).map(path=>path.trim()).filter(Boolean);
+  const result=await call('github_review',state.session,paths);
+  $('github-review-diff').textContent=result.diff||result.error||'';
+  $('github-result').textContent=result.truncated?'Diff preview truncated':'Repository review ready';
 });
 function renderSupervisorMode() {
   const proxy = $('supervisor-auth').value === 'proxy';

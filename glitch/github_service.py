@@ -1,6 +1,8 @@
-"""Read-only GitHub connections and native local checkouts. No publishing tools."""
+"""Fixed-host GitHub connections and bounded Python-native repository operations."""
 import base64
 import difflib
+import hashlib
+from dataclasses import dataclass
 from http.client import HTTPSConnection
 from contextlib import contextmanager
 from functools import wraps
@@ -13,8 +15,10 @@ import socket
 import ssl
 import stat
 import threading
+import tempfile
 import time
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
 from dulwich.client import AbstractHttpGitClient
 from dulwich.config import ConfigFile, StackedConfig
@@ -34,6 +38,7 @@ MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_CHECKOUT_BYTES = 256 * 1024 * 1024
 MAX_PACK_BYTES = 512 * 1024 * 1024
 MAX_DIFF_BYTES = 65536
+MAX_COMMITS = 1000
 TIMEOUT = 2
 API_DEADLINE = 15
 CLONE_DEADLINE = 120
@@ -107,6 +112,38 @@ def bounded_read(path, limit):
     return data
 
 
+def branch(value):
+    if (not isinstance(value, str) or value in ('HEAD', '') or value.startswith('refs/') or
+            len(value) > 200 or any(ord(c) < 33 or ord(c) > 126 for c in value)):
+        raise ValueError('Choose a safe named feature branch.')
+    return safe_branch(('refs/heads/' + value).encode('ascii'))
+
+
+def protected_path(name):
+    parts = file_path(name)
+    for part in parts:
+        part = part.lower()
+        if (part in {'.ssh', '.aws', '.azure', '.glitch', '.gitmodules', '.gitattributes',
+                     'credentials.json', 'glitch.sqlite3', 'glitch.sqlite3-wal', 'glitch.sqlite3-shm'} or
+                part.startswith('.env') or part.endswith(('.pem', '.key', '.dpapi'))):
+            raise ValueError('Protected credential or Git configuration path refused.')
+
+
+@dataclass(frozen=True)
+class PublicationReview:
+    """Only immutable host-generated state crosses the unlocked approval interval."""
+    name: str
+    arguments: str
+    connection: str
+    fingerprint: str
+    remote_refs: tuple
+    preview: str
+
+
+def digest(value):
+    return hashlib.sha256(value).hexdigest()
+
+
 class _Response:
     """Own the connection and actively interrupt slow headers/body on Stop/deadline."""
     def __init__(self, host, route, payload, cancel, deadline, headers, body=None, limit=API_BYTES):
@@ -169,15 +206,24 @@ class _Response:
 
 
 class NativeHTTP:
-    def __call__(self, endpoint, payload, cancel, deadline):
+    def __call__(self, endpoint, payload, cancel, deadline, body=None):
         # Routes are host-constructed. Never follow pagination Link URLs.
-        if not re.fullmatch(r'/user|/repos/[A-Za-z0-9-]+/[A-Za-z0-9_.-]+|/user/repos\?per_page=100&page=[1-9][0-9]*', endpoint):
+        prefix = r'/repos/[A-Za-z0-9-]+/[A-Za-z0-9_.-]+'
+        read = (r'/user|/user/repos\?per_page=100&page=[1-9][0-9]*|' + prefix +
+                r'|'+prefix+r'/branches/[A-Za-z0-9_.%~-]+|'+prefix+
+                r'/pulls\?state=all&head=[A-Za-z0-9_.%~-]+&base=[A-Za-z0-9_.%~-]+&per_page=100')
+        if not re.fullmatch(prefix + r'/pulls' if body is not None else read, endpoint):
             raise ValueError('Unsupported GitHub API route.')
         headers = {'Authorization': 'Bearer ' + payload['token'], 'Accept': 'application/vnd.github+json',
                    'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'Glitch'}
-        response = _Response('api.github.com', endpoint, payload, cancel, deadline, headers)
+        encoded = json.dumps(body, allow_nan=False).encode() if body is not None else None
+        if encoded is not None:
+            if len(encoded) > API_BYTES:
+                raise ValueError('GitHub request size limit reached.')
+            headers['Content-Type'] = 'application/json'
+        response = _Response('api.github.com', endpoint, payload, cancel, deadline, headers, encoded)
         try:
-            if response.status != 200:
+            if response.status not in (200, 201):
                 return response.status, response.headers, None
             chunks = []
             while chunk := response.read(65536):
@@ -189,17 +235,30 @@ class NativeHTTP:
 
 class NativeGitClient(AbstractHttpGitClient):
     """Dulwich smart fetch using a non-redirecting, non-proxy native HTTPS transport."""
-    def __init__(self, url, payload, cancel, deadline):
+    def __init__(self, url, payload, cancel, deadline, *, allow_push=False):
         safe_remote(url)
         super().__init__(url, dumb=False, thin_packs=True, quiet=True)
         self.url, self.payload, self.cancel, self.deadline = url, payload, cancel, deadline
         self.received = 0
+        self.allow_push = allow_push
 
     def _http_request(self, url, headers=None, data=None, raise_for_status=True):
-        # No dumb HTTP, bundles, packfile-URIs, receive-pack, redirects or auth callbacks.
-        if url == self.url + '/info/refs?service=git-upload-pack' and data is None:
+        # No dumb HTTP, bundles, packfile-URIs, redirects or auth callbacks.
+        if (url == self.url + '/info/refs?service=git-upload-pack' or
+                self.allow_push and url == self.url + '/info/refs?service=git-receive-pack') and data is None:
             route = url[len('https://github.com'):]
         elif url == self.url + '/git-upload-pack' and isinstance(data, bytes) and len(data) <= API_BYTES:
+            route = url[len('https://github.com'):]
+        elif self.allow_push and url == self.url + '/git-receive-pack' and data is not None:
+            # Dulwich emits a pack iterator. Bound it before handing bytes to HTTPS.
+            chunks, used = [], 0
+            for chunk in ([data] if isinstance(data, bytes) else data):
+                check(self.cancel, self.deadline)
+                used += len(chunk)
+                if used > MAX_PACK_BYTES:
+                    raise ValueError('Git push pack size limit reached.')
+                chunks.append(chunk)
+            data = b''.join(chunks)
             route = url[len('https://github.com'):]
         else:
             raise ValueError('Git transport destination or operation refused.')
@@ -276,7 +335,7 @@ class GitHubService:
         timer.daemon = True
         timer.start()
         try:
-            with self.resources.lease('Write file', str(workspace), cancel):
+            with self.resources.lease('GitHub mutation', str(workspace), cancel):
                 yield
         except InterruptedError:
             if time.monotonic() >= deadline:
@@ -292,10 +351,592 @@ class GitHubService:
             raise ValueError('Choose a saved github.com GitHub token.')
         return self.vault.resolve(identifier, 'https://github.com')
 
-    def _get(self, endpoint, payload, cancel, deadline):
+    def _credential_version(self, identifier):
+        self._payload(identifier)
+        with self.vault.store.lock, self.vault.store.connect() as db:
+            row = db.execute('SELECT ciphertext FROM vault WHERE id=?', (identifier,)).fetchone()
+        if row is None:
+            raise ValueError('GitHub credential was removed; bind again.')
+        return digest(bytes(row['ciphertext']))
+
+    def bind(self, workspace, credential_id, owner, name, cancel):
+        """Native UI admission only. Models have no binding or destination override tool."""
+        result = self.validate(credential_id, owner, name, cancel)
+        if not result['ok']:
+            raise ValueError('GitHub connection validation failed; validate access again.')
+        default = result['repository']['default_branch']
+        branch(default)
+        for value in (owner, name, default):
+            self._clean(value.encode())
+        connection = {'credential_id': credential_id, 'credential_version': self._credential_version(credential_id),
+                      'owner': owner, 'name': name, 'default_branch': default}
+        deadline = time.monotonic() + LOCAL_DEADLINE
+        with self._bounded_lease(workspace, cancel, deadline):
+            root, repo = self._open(workspace, cancel, deadline)
+            try:
+                self._remote(repo, connection)
+                if root.is_relative_to(self.vault.store.directory.resolve()):
+                    raise ValueError('Application data cannot be a publishing workspace.')
+                self.vault.store.bind_github(root, connection)
+            finally:
+                repo.close()
+        return {'ok': True, 'repository': result['repository'], 'credential_id': credential_id}
+
+    def connection(self, workspace):
+        connection = self.vault.store.github_connection(workspace)
+        if not connection:
+            raise ValueError('Bind this project to a validated GitHub connection in Settings first.')
+        names(connection['owner'], connection['name'])
+        branch(connection['default_branch'])
+        if self._credential_version(connection['credential_id']) != connection['credential_version']:
+            raise ValueError('GitHub credential changed; validate and bind the project again.')
+        return connection
+
+    @staticmethod
+    def _remote(repo, connection):
+        config = repo.get_config()
+        url = config.get((b'remote', b'origin'), b'url').decode('ascii')
+        if safe_remote(url) != (connection['owner'], connection['name']):
+            raise ValueError('Checkout origin does not match the bound GitHub repository.')
+        remotes = [s for s in config.sections() if s[0].lower() == b'remote']
+        if remotes != [(b'remote', b'origin')]:
+            raise ValueError('Publishing requires a single canonical origin remote.')
+        return url
+
+    def _refs(self, url, payload, cancel, deadline):
+        client = self.git_factory(url, payload, cancel, deadline)
+        try:
+            check(cancel, deadline)
+            refs = client.get_refs(url, protocol_version=1).refs
+            if len(refs) > MAX_FILES:
+                raise ValueError('GitHub ref limit reached.')
+            result = {}
+            for ref, sha in refs.items():
+                check(cancel, deadline)
+                if ref.startswith(b'refs/heads/'):
+                    safe_branch(ref)
+                    if not isinstance(sha, bytes) or not re.fullmatch(b'[0-9a-f]{40}', sha):
+                        raise ValueError('GitHub returned invalid ref data.')
+                    result[ref] = sha
+            return result
+        finally:
+            if hasattr(client, 'close'):
+                client.close()
+
+    def _branch_permission(self, connection, value, refs, payload, cancel, deadline):
+        ref = branch(value)
+        if value == connection['default_branch']:
+            raise ValueError('Publishing to the default branch is disabled.')
+        prefix = f"/repos/{connection['owner']}/{connection['name']}"
+        repository = self._repository(self._get(prefix, payload, cancel, deadline))
+        if (repository['default_branch'] != connection['default_branch'] or
+                repository['full_name'] != f"{connection['owner']}/{connection['name']}"):
+            raise ValueError('GitHub repository binding changed; validate and bind again.')
+        data = self._get(prefix + '/branches/' + quote(value, safe=''), payload, cancel, deadline,
+                         missing=ref not in refs)
+        if data is not None and (not isinstance(data, dict) or data.get('protected') is not False):
+            raise ValueError('Protected branch or unverified branch protection refused.')
+
+    def _clean(self, data):
+        # latin-1 also preserves ASCII credential bytes in otherwise binary files.
+        texts = [data.decode('latin-1')]
+        try:
+            texts.append(data.decode('utf-8'))
+        except UnicodeDecodeError:
+            pass
+        if any(self.vault.redact(text) != text or re.search(
+                r'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|(?i:password|api[_-]?key|secret|token)\s*[:=]\s*["\']?[^\s"\']{8,}',
+                text) for text in texts):
+            raise ValueError('Detected credential content refused; no values are disclosed.')
+
+    def _fingerprint(self, root, repo, connection, cancel, deadline):
+        head, original, staged = self._snapshots(repo, cancel, deadline)
+        records, total = [], 0
+        for path in sorted(self._scan(root, cancel=cancel, deadline=deadline)):
+            check(cancel, deadline)
+            name = path.relative_to(root).as_posix()
+            file_path(name)
+            data = bounded_read(path, MAX_FILE_BYTES)
+            total += len(data)
+            if total > MAX_CHECKOUT_BYTES:
+                raise ValueError('Review byte limit reached.')
+            info = path.stat()
+            records.append((name, digest(data), info.st_mode, info.st_dev, info.st_ino))
+        for name in ('HEAD', 'index', 'config', 'packed-refs'):
+            path = root / '.git' / name
+            records.append(('.git/' + name, digest(bounded_read(path, API_BYTES)) if path.exists() else None))
+        for path in (root, root / '.git'):
+            info = path.stat()
+            records.append(('directory', str(path), info.st_dev, info.st_ino))
+        refs = sorted((ref.decode(), sha.decode()) for ref, sha in repo.refs.as_dict().items())
+        value = json.dumps([connection, head, refs, sorted(original.items()), sorted(staged.items()), records],
+                           default=lambda b: b.decode('ascii'), sort_keys=True).encode()
+        return digest(value), head, original, staged
+
+    def _file_data(self, root, name):
+        protected_path(name)
+        self._clean(name.encode())
+        path = no_links(root.joinpath(*file_path(name)))
+        if path.is_dir():
+            raise ValueError('Select explicit files, not directories.')
+        data = bounded_read(path, MAX_FILE_BYTES) if path.exists() else None
+        if data is not None:
+            self._clean(data)
+        return path, data
+
+    def _commit_scan(self, repo, sha, cancel, deadline):
+        """Scan history, not only selected working bytes: a prior commit also travels."""
+        queue, seen, total = [sha], set(), 0
+        while queue:
+            check(cancel, deadline)
+            current = queue.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            if len(seen) > MAX_COMMITS:
+                raise ValueError('Publishing history scan limit reached.')
+            commit = repo.object_store[current]
+            if not isinstance(commit, Commit) or commit.id != current or commit.raw_length() > MAX_FILE_BYTES:
+                raise ValueError('Publishing requires valid commit history.')
+            self._clean(commit.as_raw_string())
+            queue.extend(commit.parents)
+            count, spelling = 0, {}
+            for entry in iter_tree_contents(repo.object_store, commit.tree):
+                check(cancel, deadline)
+                protected_path(entry.path.decode('utf-8'))
+                self._clean(entry.path)
+                parts = file_path(entry.path.decode('utf-8'))
+                for length in range(1, len(parts) + 1):
+                    prefix = '/'.join(parts[:length])
+                    if spelling.setdefault(prefix.casefold(), prefix) != prefix:
+                        raise ValueError('Publishing Windows path collision refused.')
+                count += 1
+                if count > MAX_FILES or entry.mode not in (0o100644, 0o100755):
+                    raise ValueError('Publishing tree limit or unsupported file mode.')
+                obj = repo.object_store[entry.sha]
+                if not isinstance(obj, Blob) or obj.id != entry.sha or obj.raw_length() > MAX_FILE_BYTES:
+                    raise ValueError('Publishing file scan limit reached.')
+                total += obj.raw_length()
+                if total > MAX_CHECKOUT_BYTES:
+                    raise ValueError('Publishing content scan limit reached.')
+                self._clean(obj.data)
+
+    @staticmethod
+    def _ancestor(repo, ancestor, head, cancel, deadline):
+        queue, seen = [head], set()
+        while queue:
+            check(cancel, deadline)
+            sha = queue.pop()
+            if sha == ancestor:
+                return True
+            if sha in seen:
+                continue
+            seen.add(sha)
+            if len(seen) > MAX_COMMITS:
+                raise ValueError('Ancestry check limit reached.')
+            try:
+                queue.extend(repo.object_store[sha].parents)
+            except KeyError:
+                return False
+        return False
+
+    @_local_errors
+    def prepare(self, workspace, name, args, cancel):
+        deadline = time.monotonic() + LOCAL_DEADLINE
+        connection = self.connection(workspace)
+        payload = self._payload(connection['credential_id'])
+        with self._bounded_lease(workspace, cancel, deadline):
+            root, repo = self._open(workspace, cancel, deadline)
+            try:
+                url = self._remote(repo, connection)
+                fingerprint, head, original, staged = self._fingerprint(root, repo, connection, cancel, deadline)
+                refs = self._refs(url, payload, cancel, deadline)
+                preview = {'repository': f"{connection['owner']}/{connection['name']}",
+                           'workspace': str(root), 'head': head, 'current_head': head, 'fingerprint': fingerprint,
+                           'operation': name, **args}
+                if name != 'github_clone_repo':
+                    value = args.get('branch', args.get('head'))
+                    self._branch_permission(connection, value, refs, payload, cancel, deadline)
+                if name in ('github_create_branch', 'github_commit_and_push'):
+                    if original != staged:
+                        raise ValueError('Preexisting staged changes are ambiguous; review or unstage them first.')
+                    if not head:
+                        raise ValueError('An initial repository commit is required.')
+                if name == 'github_create_branch':
+                    ref = branch(args['branch'])
+                    for path, (sha, _) in staged.items():
+                        local = no_links(root.joinpath(*file_path(path)))
+                        if not local.is_file() or Blob.from_string(bounded_read(local, MAX_FILE_BYTES)).id != sha:
+                            raise ValueError('Tracked working files must be clean before changing branches.')
+                    incoming = refs.get(ref)
+                    if incoming:
+                        client = self.git_factory(url, payload, cancel, deadline)
+                        try:
+                            fetched = client.fetch(url, repo, protocol_version=1, ref_prefix=[ref],
+                                                   progress=lambda _: check(cancel, deadline))
+                            if fetched.refs.get(ref) != incoming:
+                                raise ValueError('Remote changed during fetch; review again.')
+                        finally:
+                            if hasattr(client, 'close'):
+                                client.close()
+                        old = repo.refs[ref] if ref in repo.refs else None
+                        if old and not self._ancestor(repo, old, incoming, cancel, deadline):
+                            raise ValueError('Divergent feature branch refused; no reset, rebase or merge.')
+                        self._commit_scan(repo, incoming, cancel, deadline)
+                        entries = self._branch_entries(root, repo, incoming, original, cancel, deadline)
+                        preview.update(target_head=incoming.decode(), paths=sorted(original.keys() | entries.keys()),
+                                       diff=self._branch_diff(root, repo, original, entries, cancel, deadline))
+                    elif ref in repo.refs:
+                        raise ValueError('Local branch exists without a matching remote; choose a new feature branch.')
+                if name == 'github_commit_and_push':
+                    if repo.refs.read_ref(b'HEAD') != b'ref: ' + branch(args['branch']):
+                        raise ValueError('Selected publishing branch must be the current branch.')
+                    self._clean((args['title'] + '\n\n' + args['body']).encode())
+                    settings = self.vault.store.settings()
+                    author = settings['github_author_name'] + ' <' + settings['github_author_email'] + '>'
+                    if not settings['github_author_name'] or not settings['github_author_email']:
+                        raise ValueError('Save the GitHub author name and email in Settings first.')
+                    self._clean(author.encode())
+                    preview['author'] = author
+                    self._commit_scan(repo, head.encode(), cancel, deadline)
+                    receipt = self.vault.store.github_publication(connection['project'], args['branch'])
+                    matching = (receipt and receipt['sha'] == head and
+                                receipt['request_hash'] == digest(json.dumps(args, sort_keys=True).encode()))
+                    baseline = refs.get(branch(args['branch']), refs.get(branch(connection['default_branch'])))
+                    if head.encode() != baseline and not matching:
+                        raise ValueError('Unreviewed local commits exist; only a matching retained publication can be retried.')
+                    review_original = original
+                    if matching:
+                        commit = repo.object_store[head.encode()]
+                        if len(commit.parents) != 1:
+                            raise ValueError('Retained publication history is invalid.')
+                        parent = repo.object_store[commit.parents[0]]
+                        review_original = {entry.path.decode('utf-8'): (entry.sha, entry.mode)
+                            for entry in iter_tree_contents(repo.object_store, parent.tree)}
+                        preview['retained_commit'] = head
+                    preview['diff'] = self._review_diff(root, repo, review_original, args['paths'], cancel, deadline)
+                if name == 'github_create_pull_request':
+                    branch(args['base'])
+                    if args['base'] == args['head'] or branch(args['base']) not in refs:
+                        raise ValueError('Choose a distinct existing base branch.')
+                    if refs.get(branch(args['head'])) != (head or '').encode():
+                        raise ValueError('PR head must match the current published local commit.')
+                    self._clean((args['title'] + '\n\n' + args['body']).encode())
+                    self._commit_scan(repo, head.encode(), cancel, deadline)
+                return PublicationReview(name, json.dumps(args, sort_keys=True), json.dumps(connection, sort_keys=True),
+                    fingerprint, tuple(sorted(refs.items())), json.dumps(self.vault.redact(preview)))
+            finally:
+                repo.close()
+
+    def _branch_entries(self, root, repo, sha, original, cancel, deadline):
+        entries, spelling = {}, {}
+        commit = repo.object_store[sha]
+        for entry in iter_tree_contents(repo.object_store, commit.tree):
+            check(cancel, deadline)
+            name = entry.path.decode('utf-8')
+            parts = file_path(name)
+            for length in range(1, len(parts) + 1):
+                prefix = '/'.join(parts[:length])
+                if spelling.setdefault(prefix.casefold(), prefix) != prefix:
+                    raise ValueError('Windows tree spelling collision refused.')
+            path = no_links(root.joinpath(*parts))
+            if name not in original and path.exists():
+                raise ValueError('Incoming branch would overwrite an untracked file or directory.')
+            if any(parent.is_file() for parent in path.parents if parent != root):
+                raise ValueError('Incoming branch conflicts with an existing file directory.')
+            entries[name] = (entry.sha, entry.mode)
+        return entries
+
+    def _branch_diff(self, root, repo, original, entries, cancel, deadline):
+        output, used = [], 0
+        for name in sorted(original.keys() | entries.keys()):
+            check(cancel, deadline)
+            old, new = original.get(name), entries.get(name)
+            if old == new:
+                continue
+            before = repo.object_store[old[0]].data if old else b''
+            after = repo.object_store[new[0]].data if new else b''
+            try:
+                a, b = self.vault.redact(before.decode('utf-8')), self.vault.redact(after.decode('utf-8'))
+            except UnicodeDecodeError:
+                raise ValueError('Binary branch review is unsupported.') from None
+            if '\0' in a + b or len(a) + len(b) > 256 * 1024 or a.count('\n') + b.count('\n') > 2000:
+                raise ValueError('Branch review work limit reached.')
+            lines = difflib.unified_diff(a.splitlines(True), b.splitlines(True), 'a/' + name, 'b/' + name)
+            for line in lines:
+                used += len(line.encode())
+                if used > MAX_DIFF_BYTES:
+                    raise ValueError('Complete branch review exceeds the approval limit.')
+                output.append(line)
+            if before == after:
+                output.append(f'Existence or mode change: {name}\n')
+        return ''.join(output)
+
+    def _install_branch(self, root, repo, original, entries, cancel, deadline):
+        index = Index(root / '.git/index', read=False, object_format=repo.object_format)
+        for name in sorted(original.keys() - entries.keys()):
+            check(cancel, deadline)
+            no_links(root.joinpath(*file_path(name))).unlink()
+        for name, (sha, mode) in sorted(entries.items()):
+            check(cancel, deadline)
+            path = no_links(root.joinpath(*file_path(name)))
+            if original.get(name) != (sha, mode):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = None
+                try:
+                    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+                        temporary = Path(stream.name)
+                        stream.write(repo.object_store[sha].data)
+                    no_links(path)
+                    os.replace(temporary, path)
+                    temporary = None
+                finally:
+                    if temporary is not None:
+                        temporary.unlink(missing_ok=True)
+            index[name.encode()] = index_entry_from_stat(path.stat(), sha, mode)
+        index.write()
+
+    def _review_diff(self, root, repo, original, paths, cancel, deadline):
+        output = []
+        used = 0
+        for name in paths:
+            check(cancel, deadline)
+            _, data = self._file_data(root, name)
+            entry = original.get(name)
+            before = repo.object_store[entry[0]].data if entry else b''
+            if len(before) > MAX_FILE_BYTES:
+                raise ValueError('Review source size limit reached.')
+            self._clean(before)
+            data = data if data is not None else b''
+            try:
+                # Complete bounded source is protected before any segmentation/truncation.
+                a, b = self.vault.redact(before.decode('utf-8')), self.vault.redact(data.decode('utf-8'))
+            except UnicodeDecodeError:
+                raise ValueError('Binary publishing review is unsupported; select text files.') from None
+            if '\0' in a or '\0' in b or len(a) + len(b) > 256 * 1024 or a.count('\n') + b.count('\n') > 2000:
+                raise ValueError('Complete text review exceeds its work limit.')
+            if a == b:
+                lines = [f'File existence review: {name}\n']
+            else:
+                lines = difflib.unified_diff(a.splitlines(True), b.splitlines(True), 'a/' + name, 'b/' + name)
+            for line in lines:
+                used += len(line.encode())
+                if used > MAX_DIFF_BYTES:
+                    raise ValueError('Complete approval diff exceeds its limit; select fewer paths.')
+                output.append(line)
+        return ''.join(output)
+
+    def _recheck(self, root, repo, review, cancel, deadline):
+        connection = self.connection(root)
+        if json.dumps(connection, sort_keys=True) != review.connection:
+            raise ValueError('Project binding changed while approval was pending.')
+        url = self._remote(repo, connection)
+        fingerprint, head, original, staged = self._fingerprint(root, repo, connection, cancel, deadline)
+        if fingerprint != review.fingerprint:
+            raise ValueError('Repository HEAD, index or file bytes changed; review and approve again.')
+        payload = self._payload(connection['credential_id'])
+        refs = self._refs(url, payload, cancel, deadline)
+        if tuple(sorted(refs.items())) != review.remote_refs:
+            raise ValueError('Remote refs changed while approval was pending; review again.')
+        args = json.loads(review.arguments)
+        if review.name != 'github_clone_repo':
+            self._branch_permission(connection, args.get('branch', args.get('head')), refs, payload, cancel, deadline)
+        # Network checks do not excuse a local race during those checks.
+        if self._fingerprint(root, repo, connection, cancel, deadline)[0] != review.fingerprint:
+            raise ValueError('Repository changed during the final remote check; review again.')
+        check(cancel, deadline)
+        return connection, payload, url, refs, head, original, staged
+
+    @_local_errors
+    def mutate(self, workspace, review, cancel):
+        deadline = time.monotonic() + CLONE_DEADLINE
+        args = json.loads(review.arguments)
+        if review.name == 'github_clone_repo':
+            connection = json.loads(review.connection)
+            def before():
+                root, repo = self._open(workspace, cancel, deadline)
+                try:
+                    self._recheck(root, repo, review, cancel, deadline)
+                finally:
+                    repo.close()
+            result = self.clone(connection['credential_id'], connection['owner'], connection['name'],
+                workspace, args['folder'], cancel, lease_workspace=workspace, before=before)
+            self.vault.store.bind_github(result['workspace'], connection)
+            return result
+        with self._bounded_lease(workspace, cancel, deadline):
+            root, repo = self._open(workspace, cancel, deadline)
+            try:
+                connection, payload, url, refs, head, original, staged = self._recheck(root, repo, review, cancel, deadline)
+                if review.name == 'github_create_branch':
+                    ref = branch(args['branch'])
+                    incoming = refs.get(ref)
+                    old = repo.refs[ref] if ref in repo.refs else None
+                    if incoming:
+                        entries = self._branch_entries(root, repo, incoming, original, cancel, deadline)
+                        self._install_branch(root, repo, original, entries, cancel, deadline)
+                        if not (repo.refs.add_if_new(ref, incoming) if old is None else
+                                repo.refs.set_if_equals(ref, old, incoming)):
+                            raise ValueError('Branch changed before fast-forward update; inspect local state.')
+                        head = incoming.decode()
+                    elif not repo.refs.add_if_new(ref, head.encode()):
+                        raise ValueError('Branch changed before creation.')
+                    repo.refs.set_symbolic_ref(b'HEAD', ref)
+                    return {'ok': True, 'branch': args['branch'], 'head': head}
+                if review.name == 'github_create_pull_request':
+                    return self._pull_request(connection, args, payload, cancel, deadline)
+                return self._publish(root, repo, connection, payload, url, refs, head, args, review, cancel, deadline)
+            finally:
+                repo.close()
+
+    def _publish(self, root, repo, connection, payload, url, refs, head, args, review, cancel, deadline):
+        ref = branch(args['branch'])
+        request_hash = digest(review.arguments.encode())
+        receipt = self.vault.store.github_publication(connection['project'], args['branch'])
+        index = repo.open_index()
+        changed = False
+        for name in args['paths']:
+            path, data = self._file_data(root, name)
+            key = name.encode()
+            if data is None:
+                if key in index:
+                    del index[key]
+                    changed = True
+            else:
+                blob = Blob.from_string(data)
+                prior = index[key] if key in index else None
+                if prior is None or prior.sha != blob.id:
+                    changed = True
+                repo.object_store.add_object(blob)
+                index[key] = index_entry_from_stat(path.stat(), blob.id, prior.mode if prior else 0o100644)
+        retry = receipt and receipt['request_hash'] == request_hash and receipt['sha'] == head
+        if not changed and not retry:
+            raise ValueError('No selected changes and no matching retained commit to retry.')
+        old_remote = refs.get(ref)
+        if old_remote and not self._ancestor(repo, old_remote, head.encode(), cancel, deadline):
+            raise ValueError('Remote divergence refused; only fast-forward publishing is allowed.')
+        if changed:
+            if receipt and receipt['sha'] == head and old_remote != head.encode():
+                raise ValueError('A retained unpublished commit exists; retry it before editing these paths.')
+            commit = Commit()
+            commit.tree = index.commit(repo.object_store)
+            commit.parents = [head.encode()]
+            author = json.loads(review.preview)['author'].encode()
+            commit.author = commit.committer = author
+            commit.author_time = commit.commit_time = int(time.time())
+            commit.author_timezone = commit.commit_timezone = 0
+            commit.message = (args['title'] + '\n\n' + args['body']).rstrip().encode() + b'\n'
+            repo.object_store.add_object(commit)
+            self._commit_scan(repo, commit.id, cancel, deadline)
+            check(cancel, deadline)
+            self._recheck(root, repo, review, cancel, deadline)
+            # Journal before installing HEAD so a crash cannot leave an unidentifiable commit.
+            self.vault.store.record_github_publication(connection['project'], args['branch'], request_hash, commit.id.decode())
+            if not repo.refs.set_if_equals(ref, head.encode(), commit.id):
+                raise ValueError('HEAD changed before committing; commit was not installed.')
+            head = commit.id.decode()
+            try:
+                index.write()
+            except Exception:
+                return {'ok': False, 'head': head, 'local_commit_retained': True,
+                    'error': 'Local commit retained, but the index update failed. Inspect the index before retrying; nothing was pushed.'}
+        self._commit_scan(repo, head.encode(), cancel, deadline)
+        check(cancel, deadline)
+        if old_remote == head.encode():
+            return {'ok': True, 'head': head, 'branch': args['branch'], 'reconciled': True}
+        push_fingerprint = self._fingerprint(root, repo, connection, cancel, deadline)[0]
+        client = None
+        try:
+            client = self.git_factory(url, payload, cancel, deadline)
+            if isinstance(client, NativeGitClient):
+                client.allow_push = True
+            def update(remote):
+                check(cancel, deadline)
+                if remote.get(ref) != old_remote:
+                    raise ValueError('Remote changed before push; no override is allowed.')
+                self._branch_permission(connection, args['branch'], remote, payload, cancel, deadline)
+                if (self.connection(root) != connection or
+                        self._fingerprint(root, repo, connection, cancel, deadline)[0] != push_fingerprint):
+                    raise ValueError('Local state or credential changed before push; retained commit was not sent.')
+                check(cancel, deadline)
+                return {ref: head.encode()}
+            def pack(have, want, **kwargs):
+                check(cancel, deadline)
+                count, records = repo.object_store.generate_pack_data(have, want, **kwargs)
+                if count > MAX_FILES:
+                    raise ValueError('Push object limit reached.')
+                def bounded():
+                    for record in records:
+                        check(cancel, deadline)
+                        yield record
+                return count, bounded()
+            result = client.send_pack(url, update, pack, progress=lambda _: check(cancel, deadline))
+            if any(status is not None for status in (result.ref_status or {}).values()):
+                raise ValueError('Remote rejected the push.')
+        except Exception:
+            check(cancel, deadline)
+            # Never blindly send again: a lost response can still mean remote success.
+            try:
+                if self._refs(url, payload, cancel, deadline).get(ref) == head.encode():
+                    return {'ok': True, 'head': head, 'branch': args['branch'], 'reconciled': True}
+            except (InterruptedError, TimeoutError):
+                raise
+            except Exception:
+                pass
+            return {'ok': False, 'head': head, 'local_commit_retained': True,
+                    'error': 'Push failed or its response was lost. Local commit retained; retry the same reviewed request.'}
+        finally:
+            if client is not None and hasattr(client, 'close'):
+                client.close()
+        return {'ok': True, 'head': head, 'branch': args['branch']}
+
+    def _pull_request(self, connection, args, payload, cancel, deadline):
+        prefix = f"/repos/{connection['owner']}/{connection['name']}/pulls"
+        query = urlencode({'state': 'all', 'head': connection['owner'] + ':' + args['head'],
+                           'base': args['base'], 'per_page': 100}, quote_via=quote)
+        def search():
+            data = self._get(prefix + '?' + query, payload, cancel, deadline)
+            if not isinstance(data, list) or len(data) >= 100:
+                raise ValueError('GitHub PR search result limit or invalid data.')
+            for item in data:
+                if self._matching_pr(item, connection, args):
+                    return self._pr_result(item, connection)
+            return None
+        existing = search()
+        if existing:
+            return existing
         check(cancel, deadline)
         try:
-            code, headers, data = self.http(endpoint, payload, cancel, deadline)
+            data = self._get(prefix, payload, cancel, deadline, body=args)
+            if not self._matching_pr(data, connection, args):
+                raise ValueError('GitHub returned mismatched PR data.')
+            return self._pr_result(data, connection)
+        except Exception:
+            check(cancel, deadline)
+            existing = search()
+            if existing:
+                return existing
+            return {'ok': False, 'error': 'PR creation failed or response was lost; matching head/base will be searched before retry.'}
+
+    @staticmethod
+    def _matching_pr(item, connection, args):
+        full = f"{connection['owner']}/{connection['name']}"
+        return (isinstance(item, dict) and all(isinstance(item.get(side), dict) and
+            item[side].get('ref') == args[side] and isinstance(item[side].get('repo'), dict) and
+            item[side]['repo'].get('full_name') == full for side in ('head', 'base')))
+
+    @staticmethod
+    def _pr_result(item, connection):
+        number = item.get('number')
+        url = f"https://github.com/{connection['owner']}/{connection['name']}/pull/{number}"
+        if type(number) is not int or number < 1 or item.get('html_url') != url:
+            raise ValueError('GitHub returned invalid PR identity.')
+        return {'ok': True, 'number': number, 'url': url}
+
+    def _get(self, endpoint, payload, cancel, deadline, *, body=None, missing=False):
+        check(cancel, deadline)
+        try:
+            code, headers, data = (self.http(endpoint, payload, cancel, deadline) if body is None else
+                                  self.http(endpoint, payload, cancel, deadline, body=body))
             check(cancel, deadline)
             if code == 401:
                 raise ValueError('GitHub token is invalid or expired; replace the saved token.')
@@ -305,10 +946,12 @@ class GitHubService:
                 raise ValueError('GitHub rate limit reached; retry later.' if limited else
                                  'GitHub access denied. Check token permissions and organization approval.')
             if code == 404:
+                if missing:
+                    return None
                 raise ValueError('GitHub repository or account unavailable; check access and spelling.')
             if 300 <= code < 400:
                 raise ValueError('GitHub redirect refused. Select the canonical repository.')
-            if code != 200:
+            if code != (201 if body is not None else 200):
                 raise ValueError('GitHub service returned an unsuccessful response.')
             if len(json.dumps(data, allow_nan=False).encode()) > API_BYTES:
                 raise ValueError('GitHub response exceeded its size limit.')
@@ -393,7 +1036,7 @@ class GitHubService:
         except (OSError, ValueError):
             return False
 
-    def clone(self, credential_id, owner, repo, parent, folder, cancel):
+    def clone(self, credential_id, owner, repo, parent, folder, cancel, *, lease_workspace=None, before=None):
         names(owner, repo)
         if len(file_path(folder)) != 1:
             raise ValueError('Clone into a single new child directory.')
@@ -407,7 +1050,9 @@ class GitHubService:
         payload = self._payload(credential_id)
         url = f'https://github.com/{owner}/{repo}.git'
         deadline = time.monotonic() + CLONE_DEADLINE
-        with self._bounded_lease(destination, cancel, deadline):
+        with self._bounded_lease(lease_workspace or destination, cancel, deadline):
+            if before:
+                before()
             no_links(parent)
             destination.mkdir(exist_ok=False)
             info = destination.lstat()
@@ -531,6 +1176,9 @@ class GitHubService:
         if not git.is_dir():
             raise ValueError('Choose a local checkout with an in-workspace .git directory.')
         self._scan(git, cancel=cancel, deadline=deadline, metadata=True)
+        hooks = git / 'hooks'
+        if hooks.exists() and any(p.is_file() and not p.name.endswith('.sample') for p in hooks.iterdir()):
+            raise ValueError('Active repository hooks are refused.')
         for path in ('commondir', 'gitdir', 'objects/info/alternates', 'objects/info/http-alternates'):
             if (git / path).exists():
                 raise ValueError('External repository metadata or object stores are refused.')
@@ -572,11 +1220,15 @@ class GitHubService:
         return head.decode('ascii'), original, staged
 
     @_local_errors
-    def status(self, workspace):
-        cancel, deadline = threading.Event(), time.monotonic() + LOCAL_DEADLINE
+    def status(self, workspace, *, cancel=None, connection=None):
+        cancel, deadline = cancel if cancel is not None else threading.Event(), time.monotonic() + LOCAL_DEADLINE
         with self._bounded_lease(workspace, cancel, deadline):
             root, repo = self._open(workspace, cancel, deadline)
             try:
+                if connection is not None:
+                    if self.connection(root) != connection:
+                        raise ValueError('Project binding changed before repository inspection.')
+                    self._remote(repo, connection)
                 head, original, staged = self._snapshots(repo, cancel, deadline)
                 files = self._scan(root, cancel=cancel, deadline=deadline)
                 changes = {'add': [], 'delete': [], 'modify': []}
@@ -624,15 +1276,19 @@ class GitHubService:
                 repo.close()
 
     @_local_errors
-    def diff(self, workspace, paths):
+    def diff(self, workspace, paths, *, cancel=None, connection=None):
         if not isinstance(paths, list) or not paths or len(paths) > 100:
             raise ValueError('Select 1-100 explicit files to review.')
         for name in paths:
             file_path(name)
-        cancel, deadline = threading.Event(), time.monotonic() + LOCAL_DEADLINE
+        cancel, deadline = cancel if cancel is not None else threading.Event(), time.monotonic() + LOCAL_DEADLINE
         with self._bounded_lease(workspace, cancel, deadline):
             root, repo = self._open(workspace, cancel, deadline)
             try:
+                if connection is not None:
+                    if self.connection(root) != connection:
+                        raise ValueError('Project binding changed before repository inspection.')
+                    self._remote(repo, connection)
                 _, original, staged = self._snapshots(repo, cancel, deadline)
                 output, used, truncated, total = [], 0, False, 0
                 def blob(entry):

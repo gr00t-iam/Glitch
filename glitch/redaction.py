@@ -57,7 +57,8 @@ def tool_schema(name):
     from glitch.orchestration import DELEGATION_SCHEMAS
     from glitch.service_tools import SERVICE_SCHEMAS
     from glitch.context import CONTEXT_SCHEMAS
-    return next((item['parameters'] for item in TOOL_SCHEMAS + COMPUTER_SCHEMAS + DELEGATION_SCHEMAS + SERVICE_SCHEMAS + CONTEXT_SCHEMAS
+    from glitch.github_tools import GITHUB_SCHEMAS
+    return next((item['parameters'] for item in TOOL_SCHEMAS + COMPUTER_SCHEMAS + DELEGATION_SCHEMAS + SERVICE_SCHEMAS + CONTEXT_SCHEMAS + GITHUB_SCHEMAS
                  if item['name'] == name), {})
 
 
@@ -69,7 +70,7 @@ def arguments(name):
         result['run_id'] = OPAQUE
     if name == 'browser_action':
         result['tab_id'] = OPAQUE
-    if name in ('service_request', 'browser_fill_credential'):
+    if name in ('service_request', 'browser_fill_credential', 'github_list_repositories'):
         result['credential_id'] = OPAQUE
     if name == 'browser_fill_credential':
         result['tab_id'] = OPAQUE
@@ -99,6 +100,8 @@ DESCRIPTOR = fields('name', 'origin', 'saved', id=OPAQUE, created_at=OPAQUE, upd
                     tls=fields('verify', 'custom_ca'))
 GITHUB_REPOSITORY = fields('owner', 'name', 'full_name', 'private', 'default_branch', 'url')
 GITHUB_RESULT = fields('ok', 'error', 'message', 'workspace', 'head', 'diff', 'truncated',
+                       'branch', 'reconciled', 'local_commit_retained', 'denied', 'url', number=OPAQUE,
+                       repositories=[GITHUB_REPOSITORY],
                        credential_id=OPAQUE, repository=GITHUB_REPOSITORY,
                        account=fields('login', id=OPAQUE),
                        permissions=fields('read_verified', 'contents_write', 'pull_requests_write'),
@@ -113,6 +116,7 @@ RESULT = fields('ok', 'error', 'denied', 'content', 'value', 'output', 'diff', '
 RESULT.update(fields('status_code', connections=[DESCRIPTOR], fields=[enum('username', 'password')]))
 RESULT.update(fields('anchors', 'working', messages=[MESSAGE | fields(offset=OPAQUE)],
                      next=fields(start_id=OPAQUE, offset=OPAQUE)))
+RESULT.update({key: rule for key, rule in GITHUB_RESULT.items() if key not in RESULT})
 
 
 def action(value):
@@ -163,6 +167,9 @@ def approval(value):
         payload = fields('path', 'diff')
     elif name == 'Run command':
         payload = fields('command', 'workspace', 'note')
+    elif isinstance(name, str) and name.startswith('github_'):
+        payload = arguments(name) | fields('operation', 'repository', 'workspace', 'head', 'diff', 'author',
+            'retained_commit', 'current_head', 'target_head', 'paths', 'branch', 'title', 'body', 'folder', 'base', fingerprint=OPAQUE)
     else:
         payload = arguments(name)
     names = enum(*labels, 'Write file', 'Run command')
@@ -239,6 +246,7 @@ BRIDGE = {
     'github_validate': GITHUB_RESULT, 'github_repositories': [GITHUB_REPOSITORY],
     'github_clone': GITHUB_RESULT, 'github_cancel': OK, 'github_choose_directory': fields('path'),
     'github_reset_cancel': OK,
+    'github_bind': GITHUB_RESULT, 'github_review': GITHUB_RESULT,
     'github_save_author': settings,
     'choose_workspace': SESSION, 'new_conversation': SESSION,
     'load_conversation': fields(messages=[MESSAGE], events=[event], chat_event_watermark=OPAQUE),

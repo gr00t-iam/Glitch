@@ -60,3 +60,4 @@
 .voice-strip button{background:transparent;border-color:transparent;color:var(--muted);font-size:11px;min-height:24px}
 @media(max-width:1100px){#model-label{max-width:145px}}
 @media(max-width:550px){.composer-footer{flex-wrap:wrap}.composer-actions{flex-basis:100%}#model-label{max-width:calc(100% - 85px);margin-right:auto}}
+.repository-details{display:grid;grid-template-columns:100px minmax(0,1fr);gap:8px 12px;font-size:12px;margin:16px 0}.repository-details dt{color:var(--muted)}.repository-details dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.repository-diff{font:12px/1.6 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;border:1px solid var(--border);padding:12px;background:#101317;color:var(--text)}

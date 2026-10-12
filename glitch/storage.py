@@ -145,6 +145,15 @@ class Store:
 
     def _migrate_history(self, db):
         db.execute('CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, workspace TEXT NOT NULL UNIQUE)')
+        db.executescript('''
+            CREATE TABLE IF NOT EXISTS github_connections(
+                project TEXT PRIMARY KEY, credential_id TEXT NOT NULL,
+                credential_version TEXT NOT NULL, owner TEXT NOT NULL,
+                name TEXT NOT NULL, default_branch TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS github_publications(
+                project TEXT NOT NULL, branch TEXT NOT NULL, request_hash TEXT NOT NULL,
+                sha TEXT NOT NULL, PRIMARY KEY(project,branch));
+        ''')
         columns = {row['name'] for row in db.execute('PRAGMA table_info(sessions)')}
         for name, declaration in (('project_id', 'TEXT'), ('chat_watermark', 'INTEGER NOT NULL DEFAULT 0'),
                                   ('timeline_watermark', 'INTEGER NOT NULL DEFAULT 0'),
@@ -179,6 +188,36 @@ class Store:
             rows = [dict(row) for row in db.execute('SELECT * FROM projects ORDER BY rowid DESC')]
         return self.redact(rows, [PROJECT])
 
+    def github_connection(self, workspace):
+        canonical = os.path.normcase(str(Path(workspace).resolve()))
+        with self.lock, self.connect() as db:
+            row = db.execute('''SELECT c.* FROM github_connections c JOIN projects p
+                ON p.id=c.project WHERE p.workspace=?''', (canonical,)).fetchone()
+        return dict(row) if row else None
+
+    def bind_github(self, workspace, connection):
+        # Host-only validated metadata; callers cannot persist arbitrary response fields.
+        with self.lock, self.connect() as db:
+            project = self._register_project(db, workspace)
+            prior = db.execute('SELECT owner,name,default_branch FROM github_connections WHERE project=?', (project,)).fetchone()
+            if prior is not None and tuple(prior) != tuple(connection[key] for key in ('owner', 'name', 'default_branch')):
+                db.execute('DELETE FROM github_publications WHERE project=?', (project,))
+            db.execute('''INSERT OR REPLACE INTO github_connections
+                VALUES(?,?,?,?,?,?)''', (project, connection['credential_id'],
+                connection['credential_version'], connection['owner'], connection['name'],
+                connection['default_branch']))
+
+    def github_publication(self, project, branch):
+        with self.lock, self.connect() as db:
+            row = db.execute('SELECT * FROM github_publications WHERE project=? AND branch=?',
+                             (project, branch)).fetchone()
+        return dict(row) if row else None
+
+    def record_github_publication(self, project, branch, request_hash, sha):
+        with self.lock, self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO github_publications VALUES(?,?,?,?)',
+                       (project, branch, request_hash, sha))
+
     def _delete_sessions(self, db, sessions):
         for session in sessions:
             for table in ('messages', 'anchors', 'events', 'agent_runs', 'checkpoints', 'context_checkpoints'):
@@ -199,6 +238,8 @@ class Store:
             sessions = [row['id'] for row in db.execute('SELECT id FROM sessions WHERE project_id=?', (project,))]
             self._delete_sessions(db, sessions)
             db.execute('DELETE FROM projects WHERE id=?', (project,))
+            db.execute('DELETE FROM github_connections WHERE project=?', (project,))
+            db.execute('DELETE FROM github_publications WHERE project=?', (project,))
 
     def clear_view(self, session, kind):
         if kind not in ('chat', 'timeline'):

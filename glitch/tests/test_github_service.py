@@ -626,8 +626,10 @@ class BridgeTests(unittest.TestCase):
             self.api.github_clone(self.item['id'], 'fixture', 'sample', 'checkout', False)
         self.api._github_parent = self.root
         with patch.object(self.service, 'clone', return_value={'ok': True, 'workspace': str(self.source),
-                'credential_id': self.item['id'], 'repository': self.repository()}) as clone:
+                'credential_id': self.item['id'], 'repository': self.repository()}) as clone, \
+                patch.object(self.service, 'bind', return_value={'ok': True}) as bind:
             self.api.github_clone(self.item['id'], 'fixture', 'sample', 'checkout', True)
+        bind.assert_called_once_with(str(self.source), self.item['id'], 'fixture', 'sample', self.api._github_cancel)
         self.assertEqual(clone.call_args.args[3], self.root)
         self.assertEqual(len(self.store.sessions()), 1)
 

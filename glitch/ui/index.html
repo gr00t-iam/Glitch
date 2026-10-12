@@ -118,12 +118,18 @@
         <button id="github-validate" type="button">Validate connection</button>
         <p id="github-account" class="muted" aria-live="polite">Account not validated</p>
         <p id="github-permissions" class="notice" aria-live="polite">Read, Contents write and Pull requests write are unverified.</p>
+        <button id="github-bind" type="button" disabled>Bind selected project</button>
+        <p id="github-bound-project" class="muted" role="status"></p>
         <div class="connection-actions"><button id="github-directory" type="button">Choose clone parent folder</button><span id="github-parent" class="muted">No folder selected</span></div>
         <label>New clone directory<input id="github-folder" maxlength="100" autocomplete="off"></label>
         <button id="github-clone" class="primary" type="button" disabled>Clone repository</button>
         <h3>Git author identity</h3>
         <div class="field-grid"><label>Name<input id="github-author-name" maxlength="200" autocomplete="off"></label><label>Email<input id="github-author-email" type="email" maxlength="200" autocomplete="off"></label></div>
         <button id="github-save-author" type="button">Save author identity</button>
+        <h3>Repository review</h3>
+        <label>Selected file paths<textarea id="github-review-paths" rows="3" maxlength="10000" spellcheck="false"></textarea></label>
+        <button id="github-review" type="button">Review diff</button>
+        <pre id="github-review-diff" class="repository-diff" tabindex="0"></pre>
       </fieldset>
       <div class="connection-actions"><button id="github-cancel" type="button" disabled>Cancel GitHub operation</button></div>
       <p id="github-result" class="muted" role="status" aria-live="polite"></p>
@@ -131,7 +137,12 @@
     <div class="dialog-footer"><span id="save-result" class="muted" aria-live="polite"></span><button id="settings-save" class="primary" type="submit" disabled>Save settings</button></div>
   </form>
 </dialog>
-<dialog id="approval-dialog"><div class="dialog-header"><div><span class="pill amber">Approval required</span><h2 id="approval-title">Glitch needs your permission</h2></div></div><p class="muted">Review the exact action before Glitch continues.</p><pre id="approval-payload"></pre><div class="dialog-footer"><button id="deny">Abort &amp; Rewrite</button><button id="approve" class="primary">Approve Action</button></div></dialog>
+<dialog id="approval-dialog"><div class="dialog-header"><div><span class="pill amber">Approval required</span><h2 id="approval-title">Glitch needs your permission</h2></div></div><p class="muted">Review the exact action before Glitch continues.</p>
+  <section id="repository-review" hidden>
+    <dl class="repository-details"><dt>Repository</dt><dd id="review-repository"></dd><dt>Branch</dt><dd id="review-branch"></dd><dt>HEAD</dt><dd id="review-head"></dd><dt>Fingerprint</dt><dd id="review-fingerprint"></dd><dt>Selected paths</dt><dd id="review-paths"></dd><dt>Author</dt><dd id="review-author"></dd><dt>Message</dt><dd id="review-message"></dd></dl>
+    <pre id="review-diff" class="repository-diff" tabindex="0"></pre>
+  </section>
+  <pre id="approval-payload"></pre><div class="dialog-footer"><button id="deny">Abort &amp; Rewrite</button><button id="approve" class="primary">Approve Action</button></div></dialog>
 <dialog id="agent-dialog"><div class="dialog-header"><h2>Start an agent</h2><button id="agent-close" aria-label="Close agent setup">×</button></div><form id="agent-form"><label>Name or role<input id="agent-role" value="Researcher" maxlength="80" required></label><label>Task<textarea id="agent-task" rows="4" maxlength="20000" required></textarea></label><p class="muted">Uses your selected project's folder and the same loaded model. Computer actions are coordinated; each agent keeps its own conversation.</p><div class="dialog-footer"><button class="primary" type="submit">Start agent</button></div></form></dialog>
 <div id="toasts" role="status" aria-live="polite"></div>
 <script src="app.js"></script>
