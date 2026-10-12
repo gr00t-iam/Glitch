@@ -334,14 +334,14 @@ class ReviewTests(unittest.TestCase):
         events = fx.store.events(fx.session, 0)
         self.assertEqual(events[-1]['kind'], 'paused')
         result = next(e['payload']['result'] for e in events if e['kind'] == 'result' and e['title'] == 'github_clone_repo')
-        self.assertEqual(Path(result['active_workspace']), fx.workspace)
-        self.assertEqual(Path(result['clone_workspace']), child)
+        self.assertEqual(Path(result['active_workspace']).resolve(), fx.workspace.resolve())
+        self.assertEqual(Path(result['clone_workspace']).resolve(), child.resolve())
         self.assertTrue(result['continuation_required'])
         child_session = result['child_session_id']
-        self.assertEqual(Path(fx.store.session(fx.session)['workspace']), fx.workspace)
-        self.assertEqual(Path(fx.store.session(child_session)['workspace']), child)
+        self.assertEqual(Path(fx.store.session(fx.session)['workspace']).resolve(), fx.workspace.resolve())
+        self.assertEqual(Path(fx.store.session(child_session)['workspace']).resolve(), child.resolve())
         self.assertEqual((fx.workspace / 'hello.txt').read_bytes(), b'parent-root-only\n')
-        self.assertIn(fx.workspace.as_posix().casefold(), models.systems[0].casefold())
+        self.assertIn(fx.workspace.resolve().as_posix().casefold(), models.systems[0].casefold())
         self.assertTrue(fx.tools.execute('github_repo_status', {})['ok'])
         # A new user task explicitly selects the persisted child conversation.
         reopened = Store(fx.store.directory)
@@ -356,9 +356,9 @@ class ReviewTests(unittest.TestCase):
         results = {e['title']: e['payload']['result'] for e in reopened.events(child_session, 0) if e['kind'] == 'result'}
         self.assertTrue(results['github_repo_status']['ok'])
         self.assertEqual(results['read_file']['content'], 'hello\n')
-        self.assertIn(child.as_posix().casefold(), resumed.systems[0].casefold())
+        self.assertIn(child.resolve().as_posix().casefold(), resumed.systems[0].casefold())
         computer.execute.assert_called_once_with('browser_action', decisions[-1]['args'])
-        self.assertEqual(Path(reopened.session(fx.session)['workspace']), fx.workspace)
+        self.assertEqual(Path(reopened.session(fx.session)['workspace']).resolve(), fx.workspace.resolve())
 
     def test_nested_clone_is_excluded_from_parent_git_and_cannot_be_staged(self):
         fx = self.fx
@@ -422,7 +422,7 @@ class ReviewTests(unittest.TestCase):
         result = fx.tools.execute('github_clone_repo', {'folder': 'child'})
         self.assertTrue(result['ok'])
         self.assertEqual(fx.store.session(sibling), before)
-        self.assertEqual(Path(fx.store.session(result['child_session_id'])['workspace']), fx.workspace / 'child')
+        self.assertEqual(Path(fx.store.session(result['child_session_id'])['workspace']).resolve(), (fx.workspace / 'child').resolve())
         self.assertNotIn('secret', result)
 
 
