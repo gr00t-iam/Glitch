@@ -363,6 +363,7 @@ function updateGitHubGate() {
   $('github-bind').disabled=locked||!!state.githubBusy||!state.session||
     state.githubValidated!==JSON.stringify(githubSelection())||state.githubValidatedVersion!==githubCredentialVersion();
   $('github-review').disabled=locked||!!state.githubBusy||!state.session;
+  $('github-pull').disabled=locked||!!state.githubBusy||!state.session;
 }
 async function githubAction(action) {
   if(state.githubBusy)return;
@@ -452,6 +453,13 @@ $('github-review').onclick=()=>githubAction(async()=>{
   $('github-review-diff').textContent=result.diff||result.error||'';
   $('github-result').textContent=result.truncated?'Diff preview truncated':'Repository review ready';
 });
+$('github-pull').onclick=()=>{
+  if($('github-pull').disabled)return;
+  if($('prompt').value.trim()&&!confirm('Replace the current draft with a pull request for this project?'))return;
+  $('settings-dialog').close();
+  $('prompt').value='Use github_pull to fetch and fast-forward only the current branch of this bound project locally. Do not push, reset, merge, switch branches, or modify a dirty or divergent checkout.';
+  $('prompt').focus();
+};
 function renderSupervisorMode() {
   const proxy = $('supervisor-auth').value === 'proxy';
   $('api-fields').hidden = proxy; $('proxy-fields').hidden = !proxy;

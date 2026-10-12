@@ -111,10 +111,10 @@ class PublishingTests(unittest.TestCase):
         return self.tools.execute('github_commit_and_push',
             {'paths': ['hello.txt'], 'branch': 'feature/work', 'title': 'Fixture change', 'body': ''} | kwargs)
 
-    def test_seven_schemas_and_unknown_destructive_options(self):
+    def test_eight_schemas_and_unknown_destructive_options(self):
         self.assertEqual({s['name'] for s in GITHUB_SCHEMAS}, {
             'github_list_repositories', 'github_clone_repo', 'github_repo_status', 'github_diff',
-            'github_create_branch', 'github_commit_and_push', 'github_create_pull_request'})
+            'github_create_branch', 'github_pull', 'github_commit_and_push', 'github_create_pull_request'})
         for name in ['github_reset', 'github_delete_branch', 'github_merge', 'github_force_push']:
             with self.subTest(name=name), self.assertRaises(ValueError):
                 self.tools.execute(name, {})

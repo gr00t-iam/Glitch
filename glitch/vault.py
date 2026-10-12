@@ -18,6 +18,38 @@ FIELDS = {
 }
 
 
+class CredentialTextStream:
+    """Hold a bounded suffix until exact credentials crossing a chunk are complete."""
+    def __init__(self, secrets):
+        self.secrets = secrets
+        self.carry = max(map(len, secrets), default=1) - 1
+        if self.carry > 131072:
+            raise RuntimeError('Credential redaction limit exceeded; output is blocked.')
+        self.pattern = re.compile('|'.join(re.escape(s) for s in secrets)) if secrets else None
+        self.pending = ''
+
+    def feed(self, text):
+        self.pending += text
+        end = max(0, len(self.pending) - self.carry)
+        if self.pattern:
+            for match in self.pattern.finditer(self.pending):
+                if match.start() >= end:
+                    break
+                end = max(end, match.end())
+            safe = self.pattern.sub(REMOVED, self.pending[:end])
+        else:
+            safe = self.pending[:end]
+        self.pending = self.pending[end:]
+        return pattern_redact(safe)
+
+    def finish(self, incomplete=False):
+        text, self.pending = self.pending, ''
+        if incomplete:
+            # Overflow is not EOF. Omit the bounded uncertain suffix entirely.
+            return REMOVED if text else ''
+        return pattern_redact(self.pattern.sub(REMOVED, text) if self.pattern else text)
+
+
 def canonical_origin(value):
     """Accept only an HTTPS authority; never URLs containing routes or credentials."""
     try:
@@ -188,7 +220,7 @@ class Vault:
                     raise
                 self._loaded[row['id']] = ciphertext
 
-    def redact(self, value, schema=None):
+    def _output_secrets(self):
         with self.store.lock, self.store.connect() as db:
             self._refresh(db)
             # Existing protected settings remain where they were; cover them too.
@@ -208,7 +240,13 @@ class Vault:
             for secret in self._secrets:
                 variants.add(json.dumps(secret, ensure_ascii=True)[1:-1])
                 variants.add(json.dumps(secret, ensure_ascii=False)[1:-1])
-            secrets = sorted(variants, key=len, reverse=True)
+            return sorted(variants, key=len, reverse=True)
+
+    def text_stream(self):
+        return CredentialTextStream(self._output_secrets())
+
+    def redact(self, value, schema=None):
+        secrets = self._output_secrets()
         def text(value):
             for secret in secrets:
                 value = value.replace(secret, REMOVED)

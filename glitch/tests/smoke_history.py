@@ -98,6 +98,7 @@ def run(output, race=False):
     print(json.dumps(result, indent=2))
     if not result['passed']:
         raise SystemExit(1)
+    return result
 
 
 if __name__ == '__main__':

@@ -1,6 +1,0 @@
-{
-  "chrome_passed": true,
-  "model_passed": false,
-  "chrome_error": null,
-  "model_error": "AssertionError: Live directive was not in the next local system prompt."
-}

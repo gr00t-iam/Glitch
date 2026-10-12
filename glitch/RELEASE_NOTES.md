@@ -1,4 +1,14 @@
-# Glitch 1.2.1 - Shared context, NVIDIA GPU and chat controls
+# Glitch 1.3.0 - Protected credentials, durable context and GitHub projects
+
+- Windows DPAPI credential vault with masked settings and origin-bound host tools; known credentials are removed before capped file/readback/diff/Chrome previews and across command chunks. Actual written bytes and readback SHA-256 remain unchanged. Screenshots are not automatically pixel-redacted.
+- Project-grouped conversation history, guarded deletion, persisted presentation clears, and project removal that leaves all project files and shared vault credentials intact.
+- Automatic local checkpoints with bounded archived-history retrieval, persistent correction anchors and finite working context. One configured 65,535-token pool still serves all streams; no external model application is required.
+- Fine-grained PAT repository access, clone, status/diff, local-only current-branch fast-forward pull, explicit-path commit/push and PR creation. Read validation is not proof of write permissions; publishing still requires destination approval in Full Access. Default/protected-branch pushes, force, reset and merge remain refused.
+- Frozen CLI integration gate for disposable DPAPI, bundled Dulwich 1.2.17, Git and context fixtures, plus native vault/history/GitHub helper entrypoints. CPU inference, parallel and synthetic voice gates remain in Windows CI; no CI GPU or user credentials required.
+
+Source integration is prepared for 1.3.0. A fresh independent final review, new Windows executable build, frozen acceptance and CI/publication are controller gates, not claimed complete here. Live GitHub/Proxmox permissions, unknown-secret detection, microphone/noisy-room and screenshot privacy remain user/target-specific checks.
+
+## Glitch 1.2.1 - Shared context, NVIDIA GPU and chat controls
 
 - All 1-4 streams share a single configured context pool. A 65,535 setting no longer allocates 196,605 or 262,140 tokens for sub-agents. Independent histories borrow available cache space; over-budget combined requests wait without silently truncating history.
 - Bundled NVIDIA CUDA 12.4 runtime with automatic GPU detection and layer fitting, plus CPU fallback. No external model server or CUDA toolkit installation is required.

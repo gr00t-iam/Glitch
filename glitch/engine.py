@@ -71,7 +71,7 @@ class AgentEngine:
             self.approval_event.set()
 
     def _approve(self, action, payload):
-        if action in {'github_clone_repo', 'github_create_branch', 'github_commit_and_push', 'github_create_pull_request'}:
+        if action in {'github_clone_repo', 'github_create_branch', 'github_pull', 'github_commit_and_push', 'github_create_pull_request'}:
             resources = self.coordinator.resources if self.coordinator else SHARED_RESOURCES
             workspace = self.store.session(self.running_session)['workspace']
             with resources.human_review(self.cancelled, workspace=workspace):
@@ -83,7 +83,7 @@ class AgentEngine:
             if self.cancelled.is_set():
                 return False
             if self.store.settings().get('full_access') is True and action not in {
-                    'github_clone_repo', 'github_create_branch', 'github_commit_and_push', 'github_create_pull_request'}:
+                    'github_clone_repo', 'github_create_branch', 'github_pull', 'github_commit_and_push', 'github_create_pull_request'}:
                 self._emit('approval_resolved', 'Action allowed by Full Access',
                            {'action': action, 'payload': payload, 'approved': True, 'automatic': True})
                 return True
@@ -131,8 +131,8 @@ class AgentEngine:
                 if allowed:
                     resources.acquire(action, workspace, self.cancelled)
                 return allowed
-            tools = WorkspaceTools(workspace, approve, self._emit, self.cancelled)
-            computer = ComputerTools(self.store.directory, approve, self._emit, self.cancelled)
+            tools = WorkspaceTools(workspace, approve, self._emit, self.cancelled, vault=self.store.vault)
+            computer = ComputerTools(self.store.directory, approve, self._emit, self.cancelled, vault=self.store.vault)
             service = ServiceTools(self.store.vault, self._approve, self._emit, self.cancelled)
             service.chrome = computer.chrome
             service.resources = resources

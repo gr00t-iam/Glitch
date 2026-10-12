@@ -23,6 +23,7 @@ GITHUB_SCHEMAS = [
     schema('github_diff', 'Review explicit paths with complete-source credential redaction.', {'paths': PATHS}, ('paths',)),
     schema('github_create_branch', 'Create or fetch and fast-forward a non-default, unprotected feature branch after exact review. Dirty worktrees and divergence are refused.',
            {'branch': STRING}, ('branch',)),
+    schema('github_pull', 'Fetch and fast-forward the clean current branch locally after review, including the default branch. No remote writes, merge, reset or force; dirty or divergent checkouts are refused.', {}),
     schema('github_commit_and_push', 'Commit only explicit reviewed text paths and push fast-forward to the bound repository. '
            'No force, reset, delete or merge. Retry the identical request to recover a retained local commit.',
            {'paths': PATHS, 'branch': STRING, 'title': STRING, 'body': STRING}, ('paths', 'branch', 'title', 'body')),

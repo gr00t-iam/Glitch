@@ -50,7 +50,21 @@ jobs:
           $result = Get-Content glitch-test-output/frozen-voice/result.json -Raw | ConvertFrom-Json
           if ($p.ExitCode -ne 0 -or -not $result.passed) { throw 'Frozen voice fixtures failed' }
           Get-Content glitch-test-output/frozen-voice/result.json
-      - name: Record executable checksum
+      - name: Verify frozen vault Git history and context without native UI
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path dist/Glitch.exe) -ArgumentList '--integration-test', 'glitch-test-output/frozen-integration' -PassThru -WindowStyle Hidden
+          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id; throw 'Frozen integration timed out' }
+          $result = Get-Content glitch-test-output/frozen-integration/result.json -Raw | ConvertFrom-Json
+          if ($p.ExitCode -ne 0 -or -not $result.passed) { throw 'Frozen integration failed' }
+          Get-Content glitch-test-output/frozen-integration/result.json
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Glitch-verification
+          path: glitch-test-output/frozen-*/**/*.json
+          if-no-files-found: warn
+      - name: Record verified executable checksum
         run: (Get-FileHash dist/Glitch.exe -Algorithm SHA256).Hash | Set-Content dist/Glitch.exe.sha256
       - uses: actions/upload-artifact@v4
         with:

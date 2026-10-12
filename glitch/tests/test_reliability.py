@@ -57,9 +57,9 @@ class CompletionTests(unittest.TestCase):
         self.assertTrue(any(e['kind'] == 'completed' for e in events))
         proofs = [e['payload']['result'] for e in events if e['kind'] == 'result' and e['title'] == 'read_file']
         self.assertTrue(proofs)
-        self.assertEqual(proofs[-1]['absolute_path'], str(self.workspace / 'wiki.html'))
+        self.assertEqual(proofs[-1]['absolute_path'], str((self.workspace / 'wiki.html').resolve()))
         self.assertEqual(proofs[-1]['sha256'], hashlib.sha256((self.workspace / 'wiki.html').read_bytes()).hexdigest())
-        self.assertIn(str(self.workspace / 'wiki.html'), self.store.messages(self.session)[-1]['content'])
+        self.assertIn(str((self.workspace / 'wiki.html').resolve()), self.store.messages(self.session)[-1]['content'])
 
     def test_denied_write_does_not_complete_or_bypass_approval(self):
         _, events = self.run_worker([write(), done(), done(), done()], approve=False)

@@ -30,10 +30,11 @@ COMPUTER_SCHEMAS = [
 
 
 class ChromeController:
-    def __init__(self, data_directory, cancel=None):
+    def __init__(self, data_directory, cancel=None, vault=None):
         self.profile = Path(data_directory) / 'chrome-profile'
         self.base = 'http://127.0.0.1:9222'
         self.cancel = cancel or threading.Event()
+        self.vault = vault
 
     def ensure(self):
         if self.cancel.is_set():
@@ -131,7 +132,9 @@ class ChromeController:
             if action == 'screenshot':
                 return {'ok': True, '_image': call('Page.captureScreenshot', {'format': 'png'})['data']}
             if action == 'text':
-                expression = 'document.body.innerText.slice(0,18000)'
+                stream = self.vault.text_stream() if self.vault else None
+                text_limit = 18001 + (stream.carry if stream else 0)
+                expression = f'document.body.innerText.slice(0,{text_limit})'
             else:
                 selector = json.dumps(args.get('selector', ''))
                 if not args.get('selector'):
@@ -146,7 +149,11 @@ class ChromeController:
             result = call('Runtime.evaluate', {'expression': expression, 'returnByValue': True})
             if result.get('exceptionDetails'):
                 raise ValueError('Browser action failed: element missing or inaccessible.')
-            return {'ok': True, 'value': result.get('result', {}).get('value')}
+            value = result.get('result', {}).get('value')
+            if action == 'text' and isinstance(value, str):
+                value = ((stream.feed(value) + stream.finish(incomplete=len(value) >= text_limit))
+                         if stream else value)[:18000]
+            return {'ok': True, 'value': value}
         finally:
             connection.close()
 
@@ -222,9 +229,9 @@ class ChromeController:
 
 
 class ComputerTools:
-    def __init__(self, directory, approve, emit, cancel):
+    def __init__(self, directory, approve, emit, cancel, vault=None):
         self.directory, self.approve, self.emit, self.cancel = Path(directory), approve, emit, cancel
-        self.chrome = ChromeController(directory, cancel)
+        self.chrome = ChromeController(directory, cancel, vault=vault)
 
     def execute(self, name, args):
         schema = next((t['parameters'] for t in COMPUTER_SCHEMAS if t['name'] == name), None)

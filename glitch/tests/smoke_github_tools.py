@@ -92,6 +92,10 @@ def run(output_directory):
                 wait("document.getElementById('github-result').textContent==='Project connection saved'")
                 assert Store(store.directory).github_connection(workspace)['credential_id'] == item['id']
                 result['checks'].append('Native binding through confirmed bridge persists only project metadata')
+                window.evaluate_js("document.getElementById('github-pull').click()")
+                assert window.evaluate_js("!document.getElementById('settings-dialog').open && document.getElementById('prompt').value.includes('Use github_pull') && !state.running")
+                window.evaluate_js("document.getElementById('prompt').value='';document.getElementById('settings-open').click();document.getElementById('tab-github').click()")
+                result['checks'].append('Pull current branch prepares the explicit local-only command without automatic Send or inference')
                 (workspace / 'hello.txt').write_bytes(b'Native source changed\n')
                 window.evaluate_js("document.getElementById('github-review-paths').value='hello.txt';document.getElementById('github-review').click()")
                 wait("document.getElementById('github-review-diff').textContent.includes('+Native source changed')")

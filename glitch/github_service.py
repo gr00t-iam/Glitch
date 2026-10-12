@@ -574,6 +574,12 @@ class GitHubService:
             try:
                 url = self._remote(repo, connection)
                 fingerprint, head, original, staged = self._fingerprint(root, repo, connection, cancel, deadline)
+                if name == 'github_pull':
+                    current = repo.refs.read_ref(b'HEAD')
+                    if not current or not current.startswith(b'ref: refs/heads/'):
+                        raise _HostRefusal('Pull requires a current local branch, not detached HEAD.')
+                    args = {'branch': current[len(b'ref: refs/heads/'):].decode('utf-8')}
+                    branch(args['branch'])
                 refs = self._refs(url, payload, cancel, deadline)
                 preview = {'repository': f"{connection['owner']}/{connection['name']}",
                            'workspace': str(root), 'head': head, 'current_head': head, 'fingerprint': fingerprint,
@@ -583,21 +589,25 @@ class GitHubService:
                     self._clean(str(destination).encode())
                     preview.update(clone_destination=str(destination), continuation_required=True,
                         continuation='Current run keeps its workspace and pauses after clone. Select the new child conversation for a new task.')
-                if name != 'github_clone_repo':
+                if name not in ('github_clone_repo', 'github_pull'):
                     value = args.get('branch', args.get('head'))
                     self._branch_permission(connection, value, refs, payload, cancel, deadline)
-                if name in ('github_create_branch', 'github_commit_and_push'):
+                if name in ('github_create_branch', 'github_pull', 'github_commit_and_push'):
                     if original != staged:
                         raise _HostRefusal('Preexisting staged changes are ambiguous; review or unstage them first.')
                     if not head:
                         raise _HostRefusal('An initial repository commit is required.')
-                if name == 'github_create_branch':
+                if name in ('github_create_branch', 'github_pull'):
                     ref = branch(args['branch'])
                     for path, (sha, _) in staged.items():
                         local = no_links(root.joinpath(*file_path(path)))
                         if not local.is_file() or Blob.from_string(bounded_read(local, MAX_FILE_BYTES)).id != sha:
                             raise _HostRefusal('Tracked working files must be clean before changing branches.')
                     incoming = refs.get(ref)
+                    if name == 'github_pull':
+                        if not incoming:
+                            raise _HostRefusal('Current branch has no matching remote branch to pull.')
+                        preview['local_only'] = True
                     if incoming:
                         client = self.git_factory(url, payload, cancel, deadline)
                         try:
@@ -610,7 +620,7 @@ class GitHubService:
                                 client.close()
                         old = repo.refs[ref] if ref in repo.refs else None
                         if old and not self._ancestor(repo, old, incoming, cancel, deadline):
-                            raise _HostRefusal('Divergent feature branch refused; no reset, rebase or merge.')
+                            raise _HostRefusal('Divergent branch refused; no reset, rebase or merge.')
                         self._commit_scan(repo, incoming, cancel, deadline)
                         entries = self._branch_entries(root, repo, incoming, original, cancel, deadline)
                         preview.update(target_head=incoming.decode(), paths=sorted(original.keys() | entries.keys()),
@@ -768,7 +778,10 @@ class GitHubService:
         if tuple(sorted(refs.items())) != review.remote_refs:
             raise _HostRefusal('Remote refs changed while approval was pending; review again.')
         args = json.loads(review.arguments)
-        if review.name != 'github_clone_repo':
+        if review.name == 'github_pull':
+            if repo.refs.read_ref(b'HEAD') != b'ref: ' + branch(args['branch']):
+                raise _HostRefusal('Current branch changed while pull approval was pending.')
+        elif review.name != 'github_clone_repo':
             self._branch_permission(connection, args.get('branch', args.get('head')), refs, payload, cancel, deadline)
         # Permission requests are another network interval. Check refs/binding
         # again after them before the final local fingerprint and mutation.
@@ -810,7 +823,7 @@ class GitHubService:
             root, repo = self._open(workspace, cancel, deadline)
             try:
                 connection, payload, url, refs, head, original, staged = self._recheck(root, repo, review, cancel, deadline)
-                if review.name == 'github_create_branch':
+                if review.name in ('github_create_branch', 'github_pull'):
                     ref = branch(args['branch'])
                     incoming = refs.get(ref)
                     old = repo.refs[ref] if ref in repo.refs else None
