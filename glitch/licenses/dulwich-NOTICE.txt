@@ -1,0 +1,14 @@
+Glitch includes unmodified Dulwich 1.2.17, Copyright Jelmer Vernooij and
+Dulwich contributors. Source: https://github.com/jelmer/dulwich
+Package: https://pypi.org/project/dulwich/1.2.17/
+
+Dulwich offers Apache-2.0 OR GPL-2.0-or-later. Glitch distributes Dulwich
+under the Apache License 2.0 option. The complete upstream COPYING text,
+including both license alternatives, is in dulwich-COPYING.txt beside
+this notice and is bundled by Glitch.spec. This does not relicense Glitch.
+Only trailing blank lines have been normalized for repository hygiene.
+
+Verified PyPI metadata: Python >=3.10; released 2026-10-03.
+Windows x64 CPython 3.12 wheel:
+dulwich-1.2.17-cp312-cp312-win_amd64.whl
+SHA256: 2534d39632287c8ae2533dd0cf3ecf7cde630e0970c36f1f21e39765edd900b3

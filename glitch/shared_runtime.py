@@ -181,6 +181,42 @@ class SharedModelRuntime:
                 response.raise_for_status()
                 return response.json()
 
+    @staticmethod
+    def _converted(messages):
+        converted = []
+        for message in messages:
+            item = {'role': message['role'], 'content': message['content']}
+            if message.get('images'):
+                item['content'] = [{'type': 'text', 'text': message['content']}] + [
+                    {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + image}} for image in message['images']]
+            converted.append(item)
+        return converted
+
+    def count_prompt(self, messages, cancel):
+        if cancel.is_set():
+            raise InterruptedError('Stopped counting context.')
+        with self.lock:
+            if not self.process or self.process.poll() is not None:
+                raise RuntimeError('Load a local model before counting context.')
+        # Counts exactly the same templated text used by chat. Projector image
+        # embeddings are not exposed here; chat conservatively leases the whole pool.
+        with self._client() as client:
+            with client.post(self.url + '/apply-template', json={'messages': self._converted(messages)},
+                             timeout=(2, 5), allow_redirects=False) as formatted:
+                formatted.raise_for_status()
+                prompt = formatted.json()['prompt']
+            if cancel.is_set():
+                raise InterruptedError('Stopped counting context.')
+            with client.post(self.url + '/tokenize', json={'content': prompt, 'add_special': True, 'parse_special': True},
+                             timeout=(2, 5), allow_redirects=False) as counted:
+                counted.raise_for_status()
+                tokens = counted.json()['tokens']
+                if not isinstance(tokens, list):
+                    raise ValueError('Local tokenizer returned an invalid token count.')
+        if cancel.is_set():
+            raise InterruptedError('Stopped counting context.')
+        return len(tokens)
+
     def chat(self, messages, schema, cancel):
         if cancel.is_set():
             raise InterruptedError('Stopped.')
@@ -193,30 +229,13 @@ class SharedModelRuntime:
             self.snapshot.update(phase='generating', message='Processing locally with shared weights...')
         try:
             # llama.cpp uses OpenAI multimodal messages rather than Ollama images fields.
-            converted = []
-            for message in messages:
-                item = {'role': message['role'], 'content': message['content']}
-                if message.get('images'):
-                    item['content'] = [{'type': 'text', 'text': message['content']}] + [
-                        {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + image}} for image in message['images']]
-                converted.append(item)
-            with self._client() as client:
-                if any(message.get('images') for message in messages):
-                    # Image token counts depend on the projector. Reserve the
-                    # whole pool for visual requests rather than undercount.
-                    required = self.budget.total
-                    output_limit = min(1536, self.budget.total // 2)
-                else:
-                    with client.post(self.url + '/apply-template', json={'messages': converted}, timeout=(5, 30), allow_redirects=False) as formatted:
-                        formatted.raise_for_status()
-                        prompt = formatted.json()['prompt']
-                    with client.post(self.url + '/tokenize', json={'content': prompt, 'add_special': True, 'parse_special': True}, timeout=(5, 30), allow_redirects=False) as counted:
-                        counted.raise_for_status()
-                        prompt_tokens = len(counted.json()['tokens'])
-                    output_limit = min(1536, self.budget.total - prompt_tokens - 32)
-                    if output_limit < 64:
-                        raise ValueError('This conversation fills the shared context. Start a shorter task; no history was silently removed.')
-                    required = prompt_tokens + output_limit + 32
+            converted = self._converted(messages)
+            prompt_tokens = self.count_prompt(messages, cancel)
+            output_limit = min(1536, self.budget.total - 32 - 64)
+            if output_limit < 64 or prompt_tokens + output_limit + 32 > self.budget.total:
+                raise ValueError('This conversation fills the shared context. No history or output reserve was silently removed.')
+            required = (self.budget.total if any(message.get('images') for message in messages)
+                        else prompt_tokens + output_limit + 32)
             budget = self.budget
             ticket = budget.acquire(required, cancel)
             payload = {'messages': converted, 'temperature': self.temperature, 'max_tokens': output_limit,

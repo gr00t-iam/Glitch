@@ -10,9 +10,10 @@ import discord
 from glitch.discord_bot import DiscordGateway
 from glitch.engine import AgentEngine
 from glitch.storage import Store
+from glitch.tests.context_fixtures import ContextModelFixture
 
 
-class Worker:
+class Worker(ContextModelFixture):
     def chat(self, settings, messages, cancel):
         if messages[-1]['content'].startswith('Verified tool result'):
             return {'message': 'Remote note saved.', 'tool': None, 'done': True}

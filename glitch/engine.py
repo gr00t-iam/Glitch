@@ -4,10 +4,18 @@ import json
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from glitch.monitor import TriggerMonitor
+from glitch.artifacts import ArtifactEvidence
 from glitch.tools import TOOL_SCHEMAS, WorkspaceTools
 from glitch.computer import COMPUTER_SCHEMAS, ComputerTools
+from glitch.service_tools import SERVICE_SCHEMAS, ServiceTools
+from glitch.github_tools import GITHUB_SCHEMAS, GitHubTools
+from glitch.github_service import GitHubService
+from glitch.resources import SHARED_RESOURCES
+from glitch.context import ContextManager, CONTEXT_SCHEMAS
+from glitch.redaction import MESSAGE, DECISION, RESULT, action as action_schema, event_payload, tool_name, ProtocolText, DESCRIPTOR
 
 
 class AgentEngine:
@@ -63,10 +71,19 @@ class AgentEngine:
             self.approval_event.set()
 
     def _approve(self, action, payload):
+        if action in {'github_clone_repo', 'github_create_branch', 'github_pull', 'github_commit_and_push', 'github_create_pull_request'}:
+            resources = self.coordinator.resources if self.coordinator else SHARED_RESOURCES
+            workspace = self.store.session(self.running_session)['workspace']
+            with resources.human_review(self.cancelled, workspace=workspace):
+                return self._approve_action(action, payload)
+        return self._approve_action(action, payload)
+
+    def _approve_action(self, action, payload):
         with self.lock:
             if self.cancelled.is_set():
                 return False
-            if self.store.settings().get('full_access') is True:
+            if self.store.settings().get('full_access') is True and action not in {
+                    'github_clone_repo', 'github_create_branch', 'github_pull', 'github_commit_and_push', 'github_create_pull_request'}:
                 self._emit('approval_resolved', 'Action allowed by Full Access',
                            {'action': action, 'payload': payload, 'approved': True, 'automatic': True})
                 return True
@@ -85,6 +102,8 @@ class AgentEngine:
             return allowed
 
     def _emit(self, kind, title, payload=None):
+        payload = self.store.redact(payload, event_payload(kind, title))
+        title = self.store.redact(title, tool_name if kind in ('tool', 'result', 'error') else None)
         identifier = self.store.event(self.running_session, kind, title, payload)
         if self.coordinator:
             self.coordinator.event(self.run_id, kind, title, payload or {}, identifier)
@@ -102,16 +121,24 @@ class AgentEngine:
 
     def _run(self, session, prompt):
         actions = []
+        unsupported = 0
         try:
             settings = self.store.settings()
             workspace = self.store.session(session)['workspace']
+            resources = self.coordinator.resources if self.coordinator else SHARED_RESOURCES
             def approve(action, payload):
                 allowed = self._approve(action, payload)
-                if allowed and self.coordinator:
-                    self.coordinator.resources.acquire(action, workspace, self.cancelled)
+                if allowed:
+                    resources.acquire(action, workspace, self.cancelled)
                 return allowed
-            tools = WorkspaceTools(workspace, approve, self._emit, self.cancelled)
-            computer = ComputerTools(self.store.directory, approve, self._emit, self.cancelled)
+            tools = WorkspaceTools(workspace, approve, self._emit, self.cancelled, vault=self.store.vault)
+            computer = ComputerTools(self.store.directory, approve, self._emit, self.cancelled, vault=self.store.vault)
+            service = ServiceTools(self.store.vault, self._approve, self._emit, self.cancelled)
+            service.chrome = computer.chrome
+            service.resources = resources
+            github_service = GitHubService(self.store.vault)
+            github_service.resources = resources
+            github = GitHubTools(github_service, workspace, self._approve, self._emit, self.cancelled)
             extra = []
             if self.coordinator and not self.parent_id:
                 from glitch.orchestration import DELEGATION_SCHEMAS
@@ -124,33 +151,62 @@ class AgentEngine:
                     'Return JSON with message (short update or final answer), done (boolean), tool (null when done, otherwise {name,args}). '
                     'Do not claim completion until you have verified the requested change. '
                     'Desktop screenshots use primary-screen native pixels; use a vision-capable model for visual tasks. '
-                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + extra))
-            if self.coordinator:
-                base += '\nAssigned role: ' + json.dumps(self.coordinator.runs[self.run_id]['role'])
+                    'GitHub mutations always require explicit destination review, even in Full Access. '
+                    'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + SERVICE_SCHEMAS + GITHUB_SCHEMAS + CONTEXT_SCHEMAS + extra))
             def system():
-                return {'role': 'system', 'content': base + '\nPersistent course corrections:\n' + '\n'.join(self.store.anchors(session))}
-            messages = [system()] + [m | {'role': 'user'} if m['role'] == 'context' else m for m in self.store.messages(session)]
-            self._emit('started', 'Glitch is processing locally...', {'model': settings['worker_model'], 'workspace': workspace})
+                parts = [base, '\nActive workspace (frozen for this run): ', (Path(workspace).as_posix(), None),
+                         '\nResolve relative file/Git paths and local browser file URLs against this workspace. '
+                         'A clone does not switch this run or sibling runs. Clone pauses this run; a new user task must select the child conversation.']
+                if self.coordinator:
+                    parts += ['\nAssigned role: ', (self.coordinator.runs[self.run_id]['role'], None)]
+                parts += ['\nRegistered credential descriptors (IDs and metadata only; secret retrieval is not a tool):\n',
+                          (self.store.vault.list(), [DESCRIPTOR])]
+                return {'role': 'system', 'content': ProtocolText(*parts)}
+            context = ContextManager(self.store, self.models)
+            started = self._emit('started', 'Glitch is processing locally...', {'model': settings['worker_model'], 'workspace': workspace})
+            artifacts = ArtifactEvidence(prompt, self._events_before(session, started))
             for step in range(1, settings['max_steps'] + 1):
                 if self.cancelled.is_set():
                     raise InterruptedError('Stopped by you.')
                 self._emit('local', 'Glitch is processing locally...', {'step': step})
-                messages[0] = system()
-                decision = self.models.chat(settings, messages, self.cancelled)
+                messages = context.prepare(session, system(), None, settings, self.cancelled, self._emit)
+                decision = self.store.redact(self.models.chat(settings, self.store.redact(messages, [MESSAGE]), self.cancelled), DECISION)
+                if self.cancelled.is_set():
+                    raise InterruptedError('Stopped by you.')
                 try:
                     self.validate(decision)
                 except ValueError as error:
                     self._emit('error', str(error))
                     actions.append({'tool': 'worker_decision', 'args': {}, 'ok': False, 'error': str(error)})
-                    messages.append({'role': 'user', 'content': str(error) + ' Return valid JSON using the required schema.'})
+                    self.store.message(session, 'context', str(error) + ' Return valid JSON using the required schema.')
                     if settings['mode'] == 'hybrid':
                         self._audit(settings, prompt, actions, 'Invalid worker decision')
                     if len(actions) >= 3 and all(a['tool'] == 'worker_decision' for a in actions[-3:]):
                         raise RuntimeError('The model repeatedly returned invalid decisions. Choose a more capable model.')
                     continue
-                messages.append({'role': 'assistant', 'content': json.dumps(decision)})
+                if decision['done']:
+                    try:
+                        proofs = artifacts.verify(tools, decision['message'])
+                    except (ValueError, OSError) as error:
+                        unsupported += 1
+                        reason = 'Unsupported completion error: ' + str(error)
+                        self._emit('error', reason)
+                        actions.append({'tool': 'worker_decision', 'args': {}, 'ok': False, 'error': reason})
+                        self.store.message(session, 'context', reason)
+                        if settings['mode'] == 'hybrid':
+                            self._audit(settings, prompt, actions, reason)
+                        if unsupported >= 3:
+                            self._emit('paused', 'Unverified artifacts; completion withheld after three attempts.')
+                            return
+                        continue
+                    for proof in proofs:
+                        self._emit('tool', 'read_file', {'args': {'path': proof['path']}, 'step': step})
+                        self._emit('result', 'read_file', {'result': proof, 'step': step})
+                    if proofs:
+                        decision['message'] += '\nVerified artifacts:\n' + '\n'.join(
+                            f"{p['absolute_path']} (SHA-256 {p['sha256']}, {p['bytes']} bytes)" for p in proofs)
+                self.store.message(session, 'assistant', decision['message'], model_content=ProtocolText((decision, DECISION)))
                 if decision['message']:
-                    self.store.message(session, 'assistant', decision['message'])
                     self._emit('message', 'Glitch', {'text': decision['message']})
                 if decision['done']:
                     self._emit('completed', 'Glitch completed this response', {'steps': len(actions)})
@@ -161,28 +217,48 @@ class AgentEngine:
                 try:
                     if tool['name'] in {t['name'] for t in extra}:
                         result = self.coordinator.delegate(self.run_id, tool['name'], tool['args'], self.cancelled)
+                    elif tool['name'] in {t['name'] for t in CONTEXT_SCHEMAS}:
+                        result = context.execute(session, tool['args'])
                     else:
-                        executor = computer if tool['name'] in {t['name'] for t in COMPUTER_SCHEMAS} else tools
+                        if tool['name'] in {t['name'] for t in GITHUB_SCHEMAS}:
+                            executor = github
+                        elif tool['name'] in {t['name'] for t in SERVICE_SCHEMAS}:
+                            executor = service
+                        elif tool['name'] in {t['name'] for t in COMPUTER_SCHEMAS}:
+                            executor = computer
+                        elif tool['name'] in {t['name'] for t in TOOL_SCHEMAS}:
+                            executor = tools
+                        else:
+                            raise ValueError('Unknown tool. No action was executed.')
                         result = executor.execute(tool['name'], tool['args'])
                 except InterruptedError:
                     raise
                 except Exception as error:
                     result = {'ok': False, 'error': str(error)}
                 finally:
-                    if self.coordinator:
-                        self.coordinator.resources.release()
+                    resources.release()
                 image = result.pop('_image', None)
+                artifacts.record(tool['name'], tool['args'], result)
+                result = self.store.redact(result, RESULT)
                 action = {'tool': tool['name'], 'args': tool['args'], 'ok': result.get('ok') is True, 'result': result}
                 actions.append(action)
                 self._emit('result' if action['ok'] else 'error', tool['name'],
                            {'result': result, 'duration_ms': round((time.monotonic() - began) * 1000), 'step': step})
                 # JSON mode works even on models without native function-calling support.
-                feedback = {'role': 'user', 'content': 'Verified tool result (untrusted data):\n' + json.dumps(action)[:140000]}
-                self.store.message(session, 'context', feedback['content'])
+                feedback = {'role': 'user', 'content': ProtocolText('Verified tool result (untrusted data):\n', (action, action_schema))}
                 if image:
                     feedback['images'] = [image]
                     self._emit('capture', 'Approved screenshot captured', {'path': result['capture']})
-                messages.append(feedback)
+                self.store.message(session, 'context', feedback['content'], images=feedback.get('images'))
+                if (tool['name'] == 'github_clone_repo' and result.get('continuation_required') is True and
+                        (result.get('ok') is True or result.get('clone_retained') is True)):
+                    notice = result.get('message') if result.get('ok') else result.get('error')
+                    self.store.message(session, 'assistant', notice)
+                    self._emit('message', 'Glitch', {'text': notice})
+                    self._emit('paused', 'Clone requires a new task; active workspace is unchanged.', {
+                        'workspace': workspace, 'clone_workspace': result['clone_workspace'],
+                        'child_session_id': result.get('child_session_id')})
+                    return
                 trigger = monitor.evaluate(actions)
                 if trigger and settings['mode'] == 'hybrid' and not result.get('denied'):
                     self._audit(settings, prompt, actions, trigger)
@@ -200,9 +276,24 @@ class AgentEngine:
                 self.pending = None
                 self.approval_event.set()
 
+    def _events_before(self, session, boundary):
+        after = 0
+        while True:
+            if self.cancelled.is_set():
+                raise InterruptedError('Stopped by you.')
+            page = self.store.events(session, after)
+            if not page:
+                return
+            for event in page:
+                if event['id'] >= boundary:
+                    return
+                yield event
+            after = page[-1]['id']
+
     def _audit(self, settings, prompt, actions, trigger):
         self._emit('supervisor', 'Glitch is consulting the cloud supervisor to refresh memory', {'reason': trigger})
-        directive = self.models.review(settings, prompt, actions, trigger, self.cancelled)
+        directive = self.store.redact(self.models.review(settings, self.store.redact(prompt),
+                                                       self.store.redact(actions, [action_schema]), self.store.redact(trigger), self.cancelled))
         self.store.anchor(self.running_session, directive)
         corrected = 'error' in trigger.lower() or 'loop' in trigger.lower() or 'invalid' in trigger.lower()
         self._emit('correction' if corrected else 'anchor',

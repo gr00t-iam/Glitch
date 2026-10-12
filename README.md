@@ -31,6 +31,9 @@ Windows 10/11 x64 is the supported desktop target. NVIDIA CUDA and CPU inference
 | Computer and Chrome control | Approve clicks, typing, scrolling, browser navigation and screenshots. |
 | Execution timeline | See verified tool results, file changes, command output and corrections. |
 | Persistent conversations | Resume conversations and their verified evidence and correction anchors after restarting. |
+| Protected credential vault | Save account-encrypted credentials; models see connection IDs, not saved secrets. |
+| GitHub repositories | Fine-grained PAT access for review, clone, local fast-forward pull, feature-branch publication and pull requests. |
+| Context checkpoints | Refresh finite working context locally while preserving the original conversation archive. |
 | Parallel agents | Choose 1-4 shared-model streams and start independent tasks with separate conversations and Stop controls. |
 | Offline voice | Live dictation, optional Hey Glitch activation and spoken completion reports using Windows voices. |
 | Private Discord control | Assign tasks and approve actions remotely through a bot restricted to your User ID and optional private channel. |
@@ -45,11 +48,16 @@ The chat composer has a microphone icon for dictation, an arrow button to send, 
 
 ## Safety and privacy
 
+In **GitHub connections**, save a fine-grained PAT limited to selected repositories, validate access and bind the project. Read validation does not prove write permission. **Pull current branch** prepares a local-only task in the composer; send it to review the fast-forward. Publishing still prompts in Full Access and refuses default/protected branches, force pushes, resets and merges. See [credential, GitHub and history setup](glitch/README.md#credentials-github-and-history).
+
+Removing a project unregisters it and its Glitch history, never its disk files. Clearing a view persists without erasing the archive. Context refresh preserves archived messages but is not unlimited or lossless model memory; all streams still share the same configured 65,535-token pool.
+
 - File tools are confined to the selected workspace; sensitive paths are protected.
 - Commands use fixed recipes, not arbitrary model-generated shell strings. Tests and builds still execute project code: use trusted workspaces.
 - The cloud supervisor cannot bypass approvals or grant administrator privileges.
 - Local-only mode makes no supervisor requests. Model downloads, Chrome pages and Discord can still involve network traffic.
 - Hybrid mode shares your task and up to 15 recent redacted tool records with your chosen provider. Redaction is not a guarantee that every secret is detected.
+- Known saved credentials are masked before text preview caps and stream boundaries. Sensitive visible screen content is not automatically pixel-redacted; inspect your desktop before approving captures. Tool restrictions are not an OS sandbox.
 - Discord can receive task output and explicitly approved screenshots. Glitch must remain open; native computer control needs an awake, unlocked Windows desktop.
 - Conversations live in SQLite under `%LOCALAPPDATA%\Glitch`; saved API keys and bot tokens use Windows DPAPI.
 

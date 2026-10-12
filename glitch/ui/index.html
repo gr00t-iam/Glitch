@@ -12,6 +12,7 @@
     <div class="brand"><img src="owl.svg" alt="Glitch the robotic owl"><div><strong>Glitch</strong><span>Your local agent companion</span></div></div>
     <div class="section-heading"><h2>Projects</h2><button id="choose" title="Choose project folder" aria-label="Choose project folder">+</button></div>
     <button id="project" class="project-button">Choose a project folder</button>
+    <nav id="projects" aria-label="Registered projects"></nav>
     <div class="section-heading"><h2>Conversations</h2><button id="new" title="New conversation" aria-label="New conversation">+</button></div>
     <nav id="sessions" aria-label="Conversations"></nav>
     <div class="sidebar-bottom"><div id="discord-state" class="muted">Discord is disconnected</div><button id="settings-open">Settings &amp; connections</button><small id="access-note">Private by default. Ask before actions is on.</small></div>
@@ -20,17 +21,17 @@
     <header class="topbar"><div><h1>Workspace</h1><span id="workspace-path" class="muted">Choose where Glitch should work</span></div><div class="top-actions"><span id="access-mode" class="pill">Ask before actions</span><span id="mode" class="pill">Local only</span><button id="stop" disabled>Stop task</button></div></header>
     <div class="companion" id="companion"><img src="owl.svg" alt=""><div><strong id="status">Glitch is ready</strong><span id="status-detail">Local reasoning. Verified actions. A watchful companion.</span></div><span class="status-dot"></span></div>
     <div class="workspace">
-      <section class="conversation"><div id="messages" class="messages" aria-live="polite"><div id="welcome" class="welcome"><img src="owl.svg" alt="Glitch"><h2>A little owl. A careful co-pilot.</h2><p>Pick your local model and say hello. Choose a project folder when you want Glitch to work on existing files.</p></div></div>
+      <section class="conversation"><div class="section-heading history-heading"><h2>Chat</h2><button id="clear-chat" title="Clear chat window" aria-label="Clear chat window">Clear chat window</button></div><div id="messages" class="messages" aria-live="polite"><div id="welcome" class="welcome"><img src="owl.svg" alt="Glitch"><h2>A little owl. A careful co-pilot.</h2><p>Pick your local model and say hello. Choose a project folder when you want Glitch to work on existing files.</p></div></div>
         <div id="dictation-preview" class="dictation-preview" hidden aria-live="polite"><strong>Dictation preview</strong><span id="dictation-text">Listening...</span><button id="cancel-dictation" type="button">Cancel</button></div>
         <form id="composer"><label class="sr-only" for="prompt">Message Glitch</label><textarea id="prompt" rows="2" placeholder="Ask Glitch a question, or give it a task..."></textarea><div class="composer-footer"><div class="composer-options"><button id="composer-access" type="button" aria-pressed="false" title="Change computer action permissions"><span class="ui-icon icon-shield" aria-hidden="true"></span><span id="composer-access-label">Ask before actions</span></button></div><div class="composer-actions"><span id="model-label" class="muted">No local model selected</span><button id="microphone" class="icon-button" type="button" aria-label="Start dictation" aria-pressed="false" title="Start offline dictation"><span class="ui-icon icon-mic" aria-hidden="true"></span></button><button id="send" class="primary icon-button" type="submit" title="Send task" aria-label="Send task" disabled><span class="ui-icon icon-send" aria-hidden="true"></span></button></div></div><div class="voice-strip"><span id="voice-state" class="muted">Microphone off</span><button id="mute-voice" type="button" title="Disable listening and stop speech">Mute</button><button id="stop-speaking" type="button" hidden>Stop speaking</button></div></form>
       </section>
-      <aside class="timeline"><div class="section-heading"><h2>Agents</h2><span id="stream-count" class="pill">0 / 1</span><button id="new-agent" title="Start another agent" aria-label="Start another agent">+</button></div><div id="agent-deck"></div><div class="section-heading"><h2>Execution timeline</h2><span id="event-count" class="pill">0</span></div><div id="events"><p class="empty">Verified actions and command output appear here.</p></div></aside>
+      <aside class="timeline"><div class="section-heading"><h2>Agents</h2><span id="stream-count" class="pill">0 / 1</span><button id="new-agent" title="Start another agent" aria-label="Start another agent">+</button></div><div id="agent-deck"></div><div class="section-heading history-heading"><h2>Execution timeline</h2><span id="event-count" class="pill">0</span><button id="clear-timeline" title="Clear timeline" aria-label="Clear timeline">Clear timeline</button></div><div id="events"><p class="empty">Verified actions and command output appear here.</p></div></aside>
     </div>
   </main>
 </div>
 <dialog id="settings-dialog">
   <div class="dialog-header"><div><h2>Settings &amp; connections</h2><p class="muted">Give Glitch the right tools for your project.</p></div><button id="settings-close" aria-label="Close settings">×</button></div>
-  <div class="settings-tabs" role="tablist"><button id="tab-models" role="tab" aria-selected="true" data-tab="models">Model Manager</button><button id="tab-supervisor" role="tab" aria-selected="false" data-tab="supervisor">Supervision</button><button id="tab-discord" role="tab" aria-selected="false" data-tab="discord">Discord control</button><button id="tab-tools" role="tab" aria-selected="false" data-tab="tools">Computer &amp; safety</button><button id="tab-voice" role="tab" aria-selected="false" data-tab="voice">Voice</button></div>
+  <div class="settings-tabs" role="tablist"><button id="tab-models" role="tab" aria-selected="true" data-tab="models">Model Manager</button><button id="tab-supervisor" role="tab" aria-selected="false" data-tab="supervisor">Supervision</button><button id="tab-discord" role="tab" aria-selected="false" data-tab="discord">Discord control</button><button id="tab-tools" role="tab" aria-selected="false" data-tab="tools">Computer &amp; safety</button><button id="tab-voice" role="tab" aria-selected="false" data-tab="voice">Voice</button><button id="tab-vault" role="tab" aria-selected="false" data-tab="vault">Vault</button><button id="tab-github" role="tab" aria-selected="false" data-tab="github">GitHub</button></div>
   <form id="settings-form">
     <section id="settings-models" role="tabpanel" aria-labelledby="tab-models">
       <h3>A brain of your own</h3><p class="muted">Glitch runs GGUF models directly on your NVIDIA GPU or CPU. No separate model server is needed.</p>
@@ -85,10 +86,66 @@
       <label class="checkbox"><input id="announce-completed" type="checkbox">Speak when a task finishes</label><p class="muted">Short completion reports only, not terminal logs or every sub-agent action. Listening pauses while Glitch speaks.</p>
       <label>Windows voice<select id="speech-voice"><option value="">Windows default voice</option></select></label><div class="field-grid"><label>Volume<input id="speech-volume" type="range" min="0" max="100" value="80"></label><label>Speaking rate<input id="speech-rate" type="range" min="-10" max="10" value="0"></label></div><div class="connection-actions"><button id="test-voice" type="button">Test voice</button><button id="settings-stop-speech" type="button">Stop speaking</button></div>
     </section>
-    <div class="dialog-footer"><span id="save-result" class="muted" aria-live="polite"></span><button class="primary" type="submit">Save settings</button></div>
+    <section id="settings-vault" role="tabpanel" aria-labelledby="tab-vault" hidden>
+      <h3>Protected credentials</h3>
+      <div id="vault-list" aria-label="Saved credentials"></div>
+      <p id="vault-lock" class="notice" hidden>Stop all active tasks before changing vault credentials.</p>
+      <fieldset id="vault-fields">
+        <legend id="vault-heading">Add credential</legend>
+        <div class="field-grid"><label>Name<input id="vault-name" maxlength="120" autocomplete="off"></label><label>Type<select id="vault-kind"><option value="bearer">Service bearer token</option><option value="basic">Service username &amp; password</option><option value="proxmox">Proxmox API token</option><option value="github">GitHub token</option><option value="browser">Browser username &amp; password</option></select></label></div>
+        <label>Allowed HTTPS origin<input id="vault-origin" type="url" maxlength="2048" placeholder="https://server.example:8006" autocomplete="off"></label>
+        <label id="vault-username-row" hidden><span id="vault-username-label">Username</span><input id="vault-username" type="password" maxlength="16384" autocomplete="new-password" spellcheck="false"></label>
+        <label><span id="vault-secret-label">Token</span><input id="vault-secret" type="password" maxlength="16384" autocomplete="new-password" spellcheck="false"></label>
+        <label>TLS trust<select id="vault-trust"><option value="system">System certificate trust</option><option value="custom">Custom trusted CA</option></select></label>
+        <label id="vault-ca-row" hidden>Trusted CA certificate (PEM)<textarea id="vault-ca" rows="3" maxlength="65536" autocomplete="off" spellcheck="false"></textarea></label>
+        <div class="connection-actions"><button id="vault-save" class="primary" type="button">Add credential</button><button id="vault-cancel" type="button" hidden>Cancel update</button></div>
+      </fieldset>
+      <p id="vault-result" class="muted" role="status" aria-live="polite"></p>
+    </section>
+    <section id="settings-github" role="tabpanel" aria-labelledby="tab-github" hidden>
+      <h3>GitHub connections</h3>
+      <p id="github-lock" class="notice" hidden>Stop all active tasks before changing GitHub connections.</p>
+      <fieldset id="github-fields">
+        <label>Saved GitHub credential<select id="github-credential"><option value="">Select a saved token</option></select></label>
+        <details><summary>Add a GitHub token</summary>
+          <label>Credential name<input id="github-name" maxlength="120" autocomplete="off"></label>
+          <label>Fine-grained personal access token<input id="github-token" type="password" maxlength="16384" autocomplete="new-password" spellcheck="false"></label>
+          <button id="github-save-token" type="button">Save token securely</button>
+        </details>
+        <div class="connection-actions"><button id="github-load-repos" type="button">Load repositories</button></div>
+        <label>Repository<select id="github-repository"><option value="">Select a repository or enter its name below</option></select></label>
+        <div class="field-grid"><label>Owner<input id="github-owner" maxlength="39" autocomplete="off"></label><label>Repository name<input id="github-repo" maxlength="100" autocomplete="off"></label></div>
+        <button id="github-validate" type="button">Validate connection</button>
+        <p id="github-account" class="muted" aria-live="polite">Account not validated</p>
+        <p id="github-permissions" class="notice" aria-live="polite">Read, Contents write and Pull requests write are unverified.</p>
+        <button id="github-bind" type="button" disabled>Bind selected project</button>
+        <p id="github-bound-project" class="muted" role="status"></p>
+        <div class="connection-actions"><button id="github-directory" type="button">Choose clone parent folder</button><span id="github-parent" class="muted">No folder selected</span></div>
+        <label>New clone directory<input id="github-folder" maxlength="100" autocomplete="off"></label>
+        <button id="github-clone" class="primary" type="button" disabled>Clone repository</button>
+        <h3>Git author identity</h3>
+        <div class="field-grid"><label>Name<input id="github-author-name" maxlength="200" autocomplete="off"></label><label>Email<input id="github-author-email" type="email" maxlength="200" autocomplete="off"></label></div>
+        <button id="github-save-author" type="button">Save author identity</button>
+        <h3>Repository review</h3>
+        <label>Selected file paths<textarea id="github-review-paths" rows="3" maxlength="10000" spellcheck="false"></textarea></label>
+        <button id="github-review" type="button">Review diff</button>
+        <button id="github-pull" type="button">Pull current branch</button>
+        <pre id="github-review-diff" class="repository-diff" tabindex="0"></pre>
+      </fieldset>
+      <div class="connection-actions"><button id="github-cancel" type="button" disabled>Cancel GitHub operation</button></div>
+      <p id="github-result" class="muted" role="status" aria-live="polite"></p>
+    </section>
+    <div class="dialog-footer"><span id="save-result" class="muted" aria-live="polite"></span><button id="settings-save" class="primary" type="submit" disabled>Save settings</button></div>
   </form>
 </dialog>
-<dialog id="approval-dialog"><div class="dialog-header"><div><span class="pill amber">Approval required</span><h2 id="approval-title">Glitch needs your permission</h2></div></div><p class="muted">Review the exact action before Glitch continues.</p><pre id="approval-payload"></pre><div class="dialog-footer"><button id="deny">Abort &amp; Rewrite</button><button id="approve" class="primary">Approve Action</button></div></dialog>
+<dialog id="approval-dialog"><div class="dialog-header"><div><span class="pill amber">Approval required</span><h2 id="approval-title">Glitch needs your permission</h2></div></div><p class="muted">Review the exact action before Glitch continues.</p>
+  <section id="repository-review" hidden>
+    <dl class="repository-details"><dt>Workspace</dt><dd id="review-workspace"></dd></dl>
+    <div id="review-clone-scope" hidden><dl class="repository-details"><dt>Clone destination</dt><dd id="review-destination"></dd><dt>Continuation</dt><dd id="review-continuation"></dd></dl></div>
+    <dl class="repository-details"><dt>Repository</dt><dd id="review-repository"></dd><dt>Branch</dt><dd id="review-branch"></dd><dt>HEAD</dt><dd id="review-head"></dd><dt>Fingerprint</dt><dd id="review-fingerprint"></dd><dt>Selected paths</dt><dd id="review-paths"></dd><dt>Author</dt><dd id="review-author"></dd><dt>Message</dt><dd id="review-message"></dd></dl>
+    <pre id="review-diff" class="repository-diff" tabindex="0"></pre>
+  </section>
+  <pre id="approval-payload"></pre><div class="dialog-footer"><button id="deny">Abort &amp; Rewrite</button><button id="approve" class="primary">Approve Action</button></div></dialog>
 <dialog id="agent-dialog"><div class="dialog-header"><h2>Start an agent</h2><button id="agent-close" aria-label="Close agent setup">×</button></div><form id="agent-form"><label>Name or role<input id="agent-role" value="Researcher" maxlength="80" required></label><label>Task<textarea id="agent-task" rows="4" maxlength="20000" required></textarea></label><p class="muted">Uses your selected project's folder and the same loaded model. Computer actions are coordinated; each agent keeps its own conversation.</p><div class="dialog-footer"><button class="primary" type="submit">Start agent</button></div></form></dialog>
 <div id="toasts" role="status" aria-live="polite"></div>
 <script src="app.js"></script>

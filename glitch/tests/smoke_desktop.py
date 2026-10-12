@@ -36,6 +36,10 @@ def run(output_directory):
                 return {'phase': 'ready' if self.loaded else 'unloaded', 'name': 'fixture.gguf' if self.loaded else '', 'message': 'Fixture ready', 'usage': {}}
             def close(self): self.loaded = False
             def load(self, *_): self.loaded = True
+            def count_prompt(self, messages, cancel):
+                if cancel.is_set():
+                    raise InterruptedError('Stopped')
+                return len(json.dumps(messages).encode('utf-8')) // 8
             def chat(self, messages, schema, cancel):
                 last = messages[-1]['content']
                 return {'message': 'The note has been written and verified.', 'tool': None, 'done': True} if last.startswith('Verified tool result') else {

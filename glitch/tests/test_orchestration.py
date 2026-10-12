@@ -5,11 +5,12 @@ import unittest
 from pathlib import Path
 from glitch.storage import Store
 from glitch.orchestration import AgentCoordinator
+from glitch.tests.context_fixtures import ContextModelFixture
 
 
 class CoordinatorTests(unittest.TestCase):
     def test_capacity_and_independent_stop(self):
-        class Models:
+        class Models(ContextModelFixture):
             def chat(self, settings, messages, cancel):
                 while not cancel.wait(.01):
                     pass
@@ -31,7 +32,7 @@ class CoordinatorTests(unittest.TestCase):
             engine.close()
 
     def test_parent_child_completion_and_history_isolation(self):
-        class Models:
+        class Models(ContextModelFixture):
             def chat(self, settings, messages, cancel):
                 prompt = next(m['content'] for m in messages if m['role'] == 'user')
                 if prompt == 'child job':
@@ -63,7 +64,7 @@ class CoordinatorTests(unittest.TestCase):
             engine.close()
 
     def test_approvals_are_scoped_to_their_run(self):
-        class Models:
+        class Models(ContextModelFixture):
             def chat(self, settings, messages, cancel):
                 if messages[-1]['content'].startswith('Verified tool result'):
                     return {'done': True, 'tool': None, 'message': 'Verified'}

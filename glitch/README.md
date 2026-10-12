@@ -48,13 +48,15 @@ In **Supervision**, choose **Hybrid**, then **Developer API** or **Subscription 
 
 ### Developer API
 
-Choose OpenRouter, OpenAI, Anthropic or another compatible API. The UI supplies the base URL; configure a model available to your account and its API key. OpenAI-compatible providers use `/chat/completions` with Bearer authentication. Anthropic uses native `/messages`, `x-api-key` and the API version header. **Test connection** lists accessible models; it does not prove generation permission, available credits or unlimited access. Developer API billing is separate from consumer subscriptions.
+Choose OpenRouter, OpenAI, Anthropic or another compatible API. The UI supplies the base URL; configure a model available to your account and its API key. OpenAI-compatible providers use `/chat/completions` with Bearer authentication. Anthropic uses native `/messages`, `x-api-key` and the API version header. **Test connection** checks the catalog separately from a small real generation using your selected model. A catalog success with generation failure is not reported connected. The probe may consume usage; success does not promise future credits or unlimited access. Developer API billing is separate from consumer subscriptions.
 
 ### Authorized account bridge
 
 Configure a provider-authorized bridge on your PC exposing `GET /v1/models` and `POST /v1/chat/completions`. Enter its loopback API URL, model, optional bridge access key and local sign-in page. **Open bridge sign-in** launches that page in your normal browser. Complete the provider's authorized flow there, then **Test connection** in Glitch.
 
 The bridge owns OAuth, refresh tokens, plan entitlement and usage limits. Glitch stores only the optional bridge access key using Windows DPAPI. Only `127.0.0.1`, `::1` or `localhost` URLs are accepted, without embedded credentials, query strings or redirects. Keep that port private. The bridge must be configured separately; it is not bundled and Glitch does not provide a universal subscription proxy.
+
+Bridge requests omit optional temperature; native OpenAI reasoning model requests also omit it. A failed request never silently switches models or authentication.
 
 Glitch does not collect account passwords, cookies or consumer OAuth tokens, and does not impersonate official OAuth clients. ChatGPT subscription routing requires a supported, authorized integration: see [OpenAI sign-in documentation](https://developers.openai.com/siwc). A Plus plan alone does not make the general API free. [Anthropic's authentication rules](https://code.claude.com/docs/en/legal-and-compliance) prohibit third-party apps offering Claude.ai login or routing through Pro/Max credentials. Use an Anthropic developer API key instead. Unmodified native provider applications are a different integration and are not bundled here.
 
@@ -63,6 +65,57 @@ Glitch does not collect account passwords, cookies or consumer OAuth tokens, and
 The supervisor is consulted after every five tool steps (configurable), a tool failure, invalid worker decision or three repeated identical actions. A bounded audit contains the task and up to 15 recent redacted action records, including file/output snippets. Full conversation history and screenshots are excluded. Redaction cannot recognize every custom secret; keep confidential projects in worker-only mode.
 
 Course Correction Directives persist in SQLite and are injected into the local system instruction before every later step and future turn of that conversation. Conversation history and verified evidence survive restarts. Cloud failures pause visibly instead of skipping the audit. Six identical repeated actions stop the loop. Supervisor advice never approves an action or elevates privileges.
+
+For recognized file-creation/edit requests and every successful workspace write, `done=true` is not completion evidence. Glitch requires a successful write in that turn and current disk readback matching the intended UTF-8 bytes, records the resolved selected-workspace path and SHA-256, and attaches proof to the final answer. Missing or changed files withhold the final message and completion event, returning concrete feedback (and a hybrid audit) within the existing step budget, with at most three unsupported-completion attempts. Denied actions remain denied; the host does not write on the model's behalf. Ordinary chat and explanations do not require tools. Intent detection is conservative English text matching, not a semantic guarantee for every wording or every kind of artifact; shell success, listings and old files alone are not workspace-write proof.
+
+## Credentials, GitHub and history
+
+Use **Settings & connections > Credential vault** for bearer, Basic, browser,
+Proxmox or GitHub credentials. Secrets are encrypted with Windows DPAPI for
+the signed-in Windows account. The UI exposes saved metadata, not a reveal or
+export action; the model uses opaque connection IDs. Back up your local data,
+but do not expect another account to decrypt it. Replace or delete unreadable
+entries through credential recovery. Rotate any credential exposed outside
+Glitch; deleting it locally does not revoke it at the provider. Custom PEM CA
+trust is supported for private HTTPS services; certificate checks stay enabled.
+
+In **GitHub connections**, use a fine-grained PAT scoped to selected repositories
+on github.com. Repository Contents read permits inspection/clone/pull; Contents
+write permits publication and Pull requests write permits PR creation. Expiry,
+organization approval and branch protections still apply. Validate checks
+identity and repository read access, not proof of all write permissions. OAuth
+login and a universal consumer-subscription proxy are not provided.
+
+Choose a clone parent with the native folder picker and a new child folder, or
+bind the current checkout to its matching repository. Ask Glitch to review an
+explicit file list, create a feature branch, commit/push or open a PR. **Pull
+current branch** prepares a `github_pull` task in the composer for you to Send:
+it fetches and fast-forwards the clean current branch locally, including the
+default branch, after exact destination review. Dirty, divergent, detached or
+changed-during-review checkouts are refused. It never pushes, resets or merges.
+GitHub mutations still prompt in Full Access. Publishing refuses default and
+protected branches, external remotes, force pushes and credential-bearing paths
+or detected content. If push fails, the local commit is retained; retry the same
+reviewed request. Scanning cannot prove that arbitrary unknown secrets are absent.
+Git operations use bundled Dulwich 1.2.17; no separate Git installation is needed.
+
+Projects group conversations. Removing a project deletes its registration and
+associated Glitch history after confirmation, never the project directory or
+files; shared vault entries remain. Active runs, approvals and leases block
+removal. Clear timeline/chat window persists across restarts without deleting
+model history or evidence. Delete conversation is the permanent history action.
+
+Local context checkpoints compact older working exchanges at the configured
+threshold, preserving originals for bounded retrieval and retaining recent
+messages, corrections and verified evidence. The working context remains finite,
+not unlimited or guaranteed lossless memory. Failed or oversized compaction
+pauses safely. Supervision is optional; 1-4 streams retain one shared configured
+65,535-token pool, not one pool per agent, and use the embedded model engines.
+
+Known credentials are redacted before text previews, diffs and command stream
+boundaries. This does not detect every unknown secret or automatically redact
+sensitive pixels in screenshots. Visible on-screen private information may reach
+the model or authorized Discord channel through an approved capture.
 
 ## Discord control
 
@@ -127,11 +180,26 @@ dist\Glitch.exe --smoke-test glitch-test-output\desktop
 dist\Glitch.exe --parallel-test glitch-test-output\parallel glitch-test-output\models\stories15M-q4_0.gguf
 dist\Glitch.exe --voice-test glitch-test-output\voice
 dist\Glitch.exe --gpu-test glitch-test-output\gpu C:\Models\Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf
+dist\Glitch.exe --integration-test glitch-test-output\integration
+dist\Glitch.exe --vault-test glitch-test-output\vault
+dist\Glitch.exe --history-test glitch-test-output\history
+dist\Glitch.exe --context-test glitch-test-output\context
+dist\Glitch.exe --github-test glitch-test-output\github
+dist\Glitch.exe --github-tools-test glitch-test-output\github-tools
 ```
 
 Each writes `result.json`. CPU fixture checks exercise four occupied slots, one PID, individual cancellation and slot reuse. Only the checksum-pinned tiny fixture receives legacy formatting and a training-context metadata override; production models retain native Jinja templates and metadata. **GPU acceptance** uses the actual Muse Glimmer model, four simultaneous requests, a single 65,535-token pool, CUDA VRAM measurements and sibling-safe cancellation. This passed locally on RTX 4090 / 24 GB VRAM / 32 GB RAM, at approximately 18.5 GB total GPU usage. It establishes load/inference/concurrency, not arbitrary long-horizon task quality or full-pool throughput. The native UI test uses deterministic decisions for approvals, inline permission confirmation, icons, settings and live voice drafts. Voice checks use synthetic WAVs, not microphone/speaker playback. Paid/API/Discord checks require live credentials.
 
 ## Source structure
+
+The CLI-only `--integration-test` uses temporary synthetic credentials and local
+Git fixtures for production DPAPI round-trip/restart, native clone/diff/push,
+current-branch pull safety, persisted history clears and local checkpointing.
+It needs no native UI, GPU, microphone, user database or live GitHub account.
+The individual vault/history/GitHub helpers open disposable native windows for
+local UI verification. CI retains CPU inference/parallel/voice gates and adds
+the frozen CLI integration gate; frozen release acceptance is separate from
+source tests and must pass before publication.
 
 ```text
 glitch/

@@ -1,6 +1,8 @@
 """Workspace-scoped tools with approval before every mutation or command."""
 
+import codecs
 import difflib
+import hashlib
 import os
 import queue
 import shutil
@@ -36,11 +38,19 @@ TOOL_SCHEMAS = [
 
 
 class WorkspaceTools:
-    def __init__(self, workspace, approve, emit, cancel):
+    def __init__(self, workspace, approve, emit, cancel, vault=None):
         self.root = Path(workspace).resolve(strict=True)
         self.approve = approve
         self.emit = emit
         self.cancel = cancel
+        self.vault = vault
+
+    def redact(self, text):
+        return self.vault.redact(text) if self.vault else text
+
+    def text_stream(self):
+        from glitch.vault import CredentialTextStream
+        return self.vault.text_stream() if self.vault else CredentialTextStream([])
 
     def resolve(self, target):
         if not isinstance(target, str) or not target or '\x00' in target or ':' in target:
@@ -80,9 +90,16 @@ class WorkspaceTools:
             return {'ok': True, 'entries': rows}
         if name == 'read_file':
             path = self.resolve(args['path'])
+            stream = self.text_stream()
+            limit = 120000 + (stream.carry + 1) * 4
             with path.open('rb') as source:
-                data = source.read(120001)
-            return {'ok': True, 'path': args['path'], 'content': data[:120000].decode('utf-8'), 'truncated': len(data) > 120000}
+                data = source.read(limit + 1)
+            if self.cancel.is_set():
+                raise InterruptedError('Stopped.')
+            text = codecs.getincrementaldecoder('utf-8')().decode(data[:limit], final=len(data) <= limit)
+            text = stream.feed(text) + stream.finish(incomplete=len(data) > limit)
+            preview = text.encode('utf-8')[:120000].decode('utf-8', errors='ignore')
+            return {'ok': True, 'path': args['path'], 'content': preview, 'truncated': len(data) > 120000}
         if name == 'write_file':
             return self.write(args)
         return self.command(args['recipe'])
@@ -91,15 +108,21 @@ class WorkspaceTools:
         path = self.resolve(args['path'])
         if path == self.root or len(args['content'].encode('utf-8')) > 1_000_000:
             raise ValueError('Choose a file path; each edit may contain at most 1 MB of text.')
-        before = path.read_text(encoding='utf-8') if path.exists() else ''
-        diff = ''.join(difflib.unified_diff(before.splitlines(True), args['content'].splitlines(True),
-                                          fromfile=args['path'], tofile=args['path']))
+        with path.open('rb') if path.exists() else tempfile.TemporaryFile() as source:
+            before_bytes = source.read(1_000_001)
+        if len(before_bytes) > 1_000_000:
+            raise ValueError('Existing edit source exceeds the 1 MB limit.')
+        before = before_bytes.decode('utf-8')
+        diff = ''.join(difflib.unified_diff(self.redact(before).splitlines(True), self.redact(args['content']).splitlines(True),
+                                          fromfile=self.redact(args['path']), tofile=self.redact(args['path'])))
         if not self.approve('Write file', {'path': args['path'], 'diff': diff[:60000]}):
             return {'ok': False, 'denied': True, 'error': 'User denied this write. Revise the plan.'}
         if self.cancel.is_set():
             raise InterruptedError('Stopped.')
         self.resolve(args['path'])
-        if (path.read_text(encoding='utf-8') if path.exists() else '') != before:
+        with path.open('rb') if path.exists() else tempfile.TemporaryFile() as source:
+            current = source.read(1_000_001)
+        if current != before_bytes:
             raise ValueError('The file changed while approval was pending. Read it again before editing.')
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
@@ -116,6 +139,20 @@ class WorkspaceTools:
                 temporary.unlink(missing_ok=True)
         return {'ok': True, 'path': args['path'], 'bytes': len(args['content'].encode()), 'diff': diff[:60000]}
 
+    def readback(self, target, expected_hash):
+        """Host verification, not a model-supplied success flag or pathname."""
+        if self.cancel.is_set():
+            raise InterruptedError('Stopped.')
+        path = self.resolve(target)
+        with path.open('rb') as source:
+            data = source.read(1_000_001)
+        digest = hashlib.sha256(data).hexdigest()
+        if len(data) > 1_000_000 or digest != expected_hash:
+            raise ValueError('Artifact readback differs from the successful write: ' + target)
+        text = self.redact(data.decode('utf-8'))
+        return {'ok': True, 'path': target, 'absolute_path': str(path), 'bytes': len(data),
+                'sha256': digest, 'content': text[:120000], 'truncated': len(text) > 120000}
+
     def command(self, recipe):
         if recipe not in RECIPES:
             raise ValueError('Unknown command recipe. Arbitrary shell scripts are not accepted.')
@@ -128,25 +165,50 @@ class WorkspaceTools:
         environment = {k: v for k, v in os.environ.items() if not any(
             word in k.upper() for word in ('TOKEN', 'SECRET', 'PASSWORD', 'API_KEY'))}
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        stream = self.text_stream()
         process = subprocess.Popen(argv, cwd=self.root, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    shell=False, env=environment, creationflags=flags)
         lines = queue.Queue(maxsize=1000)
+        reader_stop = threading.Event()
         def reader():
             try:
+                decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
                 while True:
                     line = process.stdout.readline(4096)
                     if not line:
+                        tail = decoder.decode(b'', final=True)
+                        if tail:
+                            while not reader_stop.is_set():
+                                try:
+                                    lines.put(tail, timeout=.1)
+                                    break
+                                except queue.Full:
+                                    continue
                         break
-                    try:
-                        lines.put(line.decode('utf-8', errors='replace'), timeout=1)
-                    except queue.Full:
-                        continue
+                    text = decoder.decode(line)
+                    while not reader_stop.is_set():
+                        try:
+                            lines.put(text, timeout=.1)
+                            break
+                        except queue.Full:
+                            continue
+                    if reader_stop.is_set():
+                        break
             finally:
                 process.stdout.close()
         thread = threading.Thread(target=reader, daemon=True)
         thread.start()
-        collected, total, timed_out = [], 0, False
+        collected, total, timed_out, truncated = [], 0, False, False
+        def publish(text):
+            nonlocal total, truncated
+            remaining = 120000 - total
+            truncated |= len(text) > remaining
+            text = text[:remaining]
+            if text:
+                collected.append(text)
+                total += len(text)
+                self.emit('output', 'Command output', {'text': text})
         deadline = time.monotonic() + 120
         try:
             while process.poll() is None or thread.is_alive() or not lines.empty():
@@ -163,10 +225,13 @@ class WorkspaceTools:
                 except queue.Empty:
                     continue
                 if total < 120000:
-                    collected.append(line)
-                    total += len(line)
-                    self.emit('output', 'Command output', {'text': line})
+                    publish(stream.feed(line))
+                else:
+                    truncated = True
+            if not self.cancel.is_set():
+                publish(stream.finish(incomplete=timed_out or truncated))
         finally:
+            reader_stop.set()
             if process.poll() is None:
                 process.kill()
             process.wait(timeout=10)
@@ -174,4 +239,4 @@ class WorkspaceTools:
         if self.cancel.is_set():
             raise InterruptedError('Stopped.')
         return {'ok': process.returncode == 0 and not timed_out, 'exit_code': process.returncode,
-                'output': ''.join(collected), 'timed_out': timed_out, 'truncated': total >= 120000}
+                'output': ''.join(collected), 'timed_out': timed_out, 'truncated': truncated}

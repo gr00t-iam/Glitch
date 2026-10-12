@@ -1,8 +1,43 @@
 """Narrow native bridge exposed only to the bundled application page."""
 
 import threading
+from contextlib import contextmanager
+from functools import wraps
+from glitch.redaction import BRIDGE
 
 
+def _redacted_bridge(cls):
+    """Cover every public native result/exception, including future bridge methods."""
+    def guard(method):
+        @wraps(method)
+        def invoke(self, *args, **kwargs):
+            try:
+                if method.__name__ in ('send', 'spawn_agent', 'save_settings'):
+                    if self._github_busy:
+                        raise ValueError('Wait for or cancel the GitHub operation before submitting tasks or settings.')
+                    with self._engine.lock:
+                        self._require_initialized()
+                        result = method(self, *args, **kwargs)
+                else:
+                    result = method(self, *args, **kwargs)
+                if method.__name__ in ('screenshot', 'vault_list') or (method.__name__ == 'bootstrap' and result.get('recovery_required')):
+                    return result
+                return self._store.redact(result, BRIDGE.get(method.__name__))
+            except Exception as error:
+                try:
+                    message = self._store.redact(str(error))
+                except Exception:
+                    message = 'Credential protection failed. Complete credential recovery and initialization before submitting tasks or settings.'
+                raise ValueError(message) from None
+        return invoke
+    for name, method in list(vars(cls).items()):
+        # Image bytes are not text. Metadata-only listing remains available for recovery.
+        if not name.startswith('_') and callable(method):
+            setattr(cls, name, guard(method))
+    return cls
+
+
+@_redacted_bridge
 class DesktopAPI:
     def __init__(self, store, engine, models):
         self._store, self._engine, self._models = store, engine, models
@@ -12,11 +47,158 @@ class DesktopAPI:
         self._audio = None
         self._speech = None
         self._voice_session = None
+        self._recovery_required = False
+        self._github = None
+        self._github_parent = None
+        self._github_busy = False
+        self._github_cancel = threading.Event()
+        self._github_operation_lock = threading.Lock()
 
     def bootstrap(self):
-        return {'settings': self._store.settings(), 'sessions': self._store.sessions(),
+        try:
+            self._store.redact('')
+        except RuntimeError:
+            self._recovery_required = True
+            return {'initialized': False, 'recovery_required': True,
+                    'message': 'Saved credentials require recovery. Task and settings submission is blocked until initialization completes.',
+                    'vault': self.vault_list()}
+        result = {'settings': self._store.settings(), 'sessions': self._store.sessions(), 'projects': self._store.projects(),
                 'runtime': self._engine.state(), 'discord': self._discord.status() if self._discord else {},
-                'startup_warnings': list(self._store.startup_warnings), 'voice': self.voice_status()}
+                'startup_warnings': list(self._store.startup_warnings), 'voice': self.voice_status(),
+                'vault': self.vault_list(), 'initialized': True, 'recovery_required': False}
+        result = self._store.redact(result, BRIDGE['bootstrap'])
+        self._recovery_required = False
+        return result
+
+    def _require_initialized(self):
+        if not self._recovery_required:
+            try:
+                self._store.redact('')
+            except RuntimeError:
+                self._recovery_required = True
+        if self._recovery_required:
+            raise ValueError('Complete credential recovery and initialization before submitting tasks or settings.')
+
+    def vault_list(self):
+        return self._store.vault.list()
+
+    def vault_save(self, name, kind, origin, payload, identifier=None):
+        # Use the same lock as run admission, including Discord/delegated starts.
+        with self._engine.lock:
+            self._vault_idle()
+            return self._store.vault.save(name, kind, origin, payload, identifier)
+
+    def vault_delete(self, identifier):
+        with self._engine.lock:
+            self._vault_idle()
+            self._store.vault.delete(identifier)
+            return {'ok': True}
+
+    def _vault_idle(self):
+        if hasattr(self._engine, 'is_idle'):
+            busy = not self._engine.is_idle()
+        else:
+            state = self._engine.state()
+            busy = state['running_session'] or state.get('active_sessions') or state.get('approval') or state.get('approvals')
+        if busy:
+            raise ValueError('Stop all active tasks before changing vault credentials.')
+
+    @contextmanager
+    def _github_operation(self):
+        if not self._github_operation_lock.acquire(blocking=False):
+            raise ValueError('Wait for or cancel the current GitHub operation.')
+        try:
+            # Reserve admission through the operation; Discord/delegated starts use this lock too.
+            # No human approval or model call occurs while it is held. Cancel does not take it.
+            with self._engine.lock:
+                self._require_initialized()
+                self._vault_idle()
+                self._github_busy = True
+                try:
+                    if self._github is None:
+                        from glitch.github_service import GitHubService
+                        self._github = GitHubService(self._store.vault)
+                    yield self._github
+                finally:
+                    self._github_busy = False
+        finally:
+            self._github_operation_lock.release()
+
+    def github_validate(self, credential_id, owner, repo):
+        with self._github_operation() as service:
+            try:
+                return service.validate(credential_id, owner, repo, self._github_cancel)
+            except InterruptedError:
+                return {'ok': False, 'error': 'GitHub operation cancelled.'}
+
+    def github_repositories(self, credential_id):
+        with self._github_operation() as service:
+            return service.repositories(credential_id, self._github_cancel)
+
+    def github_bind(self, session, credential_id, owner, repo, confirmed=False):
+        if confirmed is not True:
+            raise ValueError('Explicitly confirm binding the selected project to this GitHub repository.')
+        with self._github_operation() as service:
+            workspace = self._store.session(session)['workspace']
+            return service.bind(workspace, credential_id, owner, repo, self._github_cancel)
+
+    def github_review(self, session, paths):
+        with self._github_operation() as service:
+            workspace = self._store.session(session)['workspace']
+            connection = service.connection(workspace)
+            return service.diff(workspace, paths, cancel=self._github_cancel, connection=connection)
+
+    def github_cancel(self):
+        self._github_cancel.set()
+        return {'ok': True}
+
+    def github_reset_cancel(self):
+        if not self._github_operation_lock.acquire(blocking=False):
+            raise ValueError('Wait for the current GitHub operation before starting another.')
+        try:
+            with self._engine.lock:
+                self._require_initialized()
+                self._vault_idle()
+                self._github_cancel.clear()
+            return {'ok': True}
+        finally:
+            self._github_operation_lock.release()
+
+    def github_choose_directory(self):
+        import webview
+        self._require_initialized()
+        with self._picker_lock:
+            selected = self._window.create_file_dialog(webview.FileDialog.FOLDER)
+        self._github_parent = None
+        if not selected:
+            return None
+        from glitch.github_service import no_links
+        with self._engine.lock:
+            self._vault_idle()
+            parent = no_links(selected[0])
+            if not parent.is_dir():
+                raise ValueError('Choose an existing local clone parent directory.')
+            self._github_parent = parent
+        return {'path': str(parent)}
+
+    def github_clone(self, credential_id, owner, repo, folder, confirmed=False):
+        if confirmed is not True or self._github_parent is None:
+            raise ValueError('Choose a native clone parent directory and explicitly confirm the clone.')
+        with self._github_operation() as service:
+            try:
+                result = service.clone(credential_id, owner, repo, self._github_parent, folder, self._github_cancel)
+            except InterruptedError as error:
+                return {'ok': False, 'error': str(error)}
+            if result.get('ok'):
+                result['session'] = self._store.session(self._store.new_session(result['workspace']))
+                service.bind(result['workspace'], credential_id, owner, repo, self._github_cancel)
+            return result
+
+    def github_save_author(self, name, email):
+        with self._engine.lock:
+            self._require_initialized()
+            self._vault_idle()
+            return self._store.save_settings({'github_author_name': name, 'github_author_email': email})
 
     def choose_workspace(self):
         import webview
@@ -31,17 +213,48 @@ class DesktopAPI:
     def new_conversation(self, session=None):
         if self._engine.state()['running_session'] and not hasattr(self._engine, 'active_session'):
             raise ValueError('Stop the active task first.')
-        if session:
-            workspace = self._store.session(session)['workspace']
-        else:
+        from pathlib import Path
+        workspace = self._store.session(session)['workspace'] if session else None
+        if not workspace or not Path(workspace).is_dir():
             import uuid
             workspace = self._store.directory / 'workspaces' / ('Chat-' + uuid.uuid4().hex[:12])
             workspace.mkdir(parents=True, exist_ok=False)
         return self._store.session(self._store.new_session(workspace))
 
     def load_conversation(self, session):
-        self._store.session(session)
-        return {'messages': [m for m in self._store.messages(session) if m['role'] != 'context'], 'events': self._store.events(session, 0)}
+        record = self._store.session(session)
+        return {'messages': self._store.visible_messages(session), 'events': self._store.visible_events(session, 0),
+                'chat_event_watermark': record['chat_event_watermark']}
+
+    def projects(self):
+        return self._store.projects()
+
+    def _history_mutation(self, method, identifier):
+        with self._engine.lock:
+            self._require_initialized()
+            getattr(self._engine, method)(identifier)
+            sessions = self._store.sessions()
+            if self._voice_session and not any(row['id'] == self._voice_session for row in sessions):
+                if self._audio:
+                    self._audio.cancel()
+                self._voice_session = None
+            return {'ok': True, 'session': sessions[0] if sessions else None}
+
+    def delete_session(self, session):
+        return self._history_mutation('delete_session', session)
+
+    def remove_project(self, project):
+        return self._history_mutation('remove_project', project)
+
+    def clear_view(self, session, kind):
+        self._require_initialized()
+        return self._store.clear_view(session, kind)
+
+    def dismiss_run(self, identifier):
+        with self._engine.lock:
+            self._require_initialized()
+            self._engine.dismiss_run(identifier)
+        return {'ok': True}
 
     def save_settings(self, update):
         if self._engine.state()['running_session']:
@@ -115,7 +328,7 @@ class DesktopAPI:
 
     def send(self, session, prompt):
         self._engine.start(session, prompt)
-        return {'ok': True}
+        return {'ok': True, 'prompt': self._store.redact(prompt)}
 
     def spawn_agent(self, session, role, task):
         if not hasattr(self._engine, 'active_session'):
@@ -138,7 +351,7 @@ class DesktopAPI:
 
     def poll(self, session, after):
         self._store.session(session)
-        return {'events': self._store.events(session, after), 'runtime': self._engine.state(),
+        return {'events': self._store.visible_events(session, after), 'runtime': self._engine.state(),
                 'discord': self._discord.status() if self._discord else {}, 'voice': self.voice_status()}
 
     def voice_status(self):

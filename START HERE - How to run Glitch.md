@@ -33,6 +33,13 @@ Enable **Speak when a task finishes** to hear short reports through your speaker
 
 ## If something fails
 
+For GitHub projects, save a repository-scoped fine-grained PAT in **GitHub
+connections**, validate it and bind your project. Ask for review/push/PR work,
+or choose **Pull current branch** and send the prepared local-only task. Read
+validation is not write permission; publication still prompts in Full Access.
+Removing a project leaves its disk files intact. Context refresh keeps the
+archive, not unlimited model memory. [Credential and history details](glitch/README.md#credentials-github-and-history).
+
 - **No models found:** download or import a single GGUF file in Model Manager. Repository links and split model parts are not accepted.
 - **Model fails to load:** select a supported instruction-tuned GGUF that fits your RAM. Lower the context length or use a smaller quantized model. An old external-server model name is not a local GGUF file.
 - **Stop interrupts local inference:** only the selected stream stops; other agents keep working and the model remains loaded. Reload if the entire model process failed.

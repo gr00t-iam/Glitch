@@ -28,7 +28,7 @@ class DiscordGateway:
 
     def _status(self, connected, message):
         with self._lock:
-            self._state = {'connected': connected, 'message': message}
+            self._state = {'connected': connected, 'message': self.store.redact(message)}
 
     def start(self):
         with self._lock:
@@ -141,7 +141,7 @@ class DiscordGateway:
                 try:
                     gateway.engine.start(session, content[6:])
                 except ValueError as error:
-                    await message.channel.send(str(error), allowed_mentions=discord.AllowedMentions.none())
+                    await message.channel.send(gateway.store.redact(str(error)), allowed_mentions=discord.AllowedMentions.none())
                     return
                 gateway._active_session = session
                 gateway._remote_sessions.add(session)
@@ -161,8 +161,8 @@ class DiscordGateway:
                             if kind == 'approval' and payload['id'] not in approval_ids:
                                 approval_ids.add(payload['id'])
                                 import json
-                                description = json.dumps(payload['payload'], indent=2)[:1300]
-                                await channel.send(f"**{payload['action']} — approval required**\n```\n{description}\n```", view=ApprovalView(payload, channel), allowed_mentions=discord.AllowedMentions.none())
+                                description = json.dumps(gateway.store.redact(payload['payload']), indent=2)[:1300]
+                                await channel.send(gateway.store.redact(f"**{payload['action']} — approval required**\n```\n{description}\n```"), view=ApprovalView(payload, channel), allowed_mentions=discord.AllowedMentions.none())
                             elif kind == 'capture':
                                 path = Path(payload['path']).resolve()
                                 if path.is_relative_to((gateway.store.directory / 'captures').resolve()) and path.is_file():
@@ -180,9 +180,9 @@ class DiscordGateway:
                             elif kind == 'message':
                                 text.append(payload['text'])
                             elif kind == 'output':
-                                text.append(payload['text'][:300])
+                                text.append(gateway.store.redact(payload['text'])[:300])
                         if text:
-                            joined = '\n'.join(text)
+                            joined = gateway.store.redact('\n'.join(text))
                             for offset in range(0, min(len(joined), 10000), 1800):
                                 await channel.send(joined[offset:offset + 1800], allowed_mentions=discord.AllowedMentions.none())
                         if not gateway._is_active(session) and not events:
