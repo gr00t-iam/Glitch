@@ -186,6 +186,10 @@ function updateRuntime(runtime) {
     $('repository-review').hidden=!repositoryReview;
     $('approval-payload').hidden=repositoryReview;
     if(repositoryReview){
+      $('review-workspace').textContent=preview.workspace||'';
+      $('review-clone-scope').hidden=!preview.clone_destination;
+      $('review-destination').textContent=preview.clone_destination||'';
+      $('review-continuation').textContent=preview.continuation||'';
       $('review-repository').textContent=preview.repository||'';
       $('review-branch').textContent=preview.branch||[preview.head,preview.base].filter(Boolean).join(' -> ');
       $('review-head').textContent=[preview.current_head||preview.head,preview.target_head].filter(Boolean).join(' -> ');

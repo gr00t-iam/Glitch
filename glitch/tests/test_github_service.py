@@ -397,9 +397,17 @@ class GitHubTests(unittest.TestCase):
         from glitch.resources import SHARED_RESOURCES
         checkout = Path(self.clone()['workspace'])
         lock = SHARED_RESOURCES.workspaces[os.path.normcase(os.path.realpath(checkout))]
-        lock.acquire()
-        timer = threading.Timer(.7, lock.release)
-        timer.start()
+        owned, release = threading.Event(), threading.Event()
+        def holder():
+            lock.acquire()
+            owned.set()
+            try:
+                release.wait(3)
+            finally:
+                lock.release()
+        worker = threading.Thread(target=holder)
+        worker.start()
+        self.assertTrue(owned.wait(1))
         try:
             started = time.monotonic()
             with patch('glitch.github_service.LOCAL_DEADLINE', .1):
@@ -407,7 +415,9 @@ class GitHubTests(unittest.TestCase):
                     self.service.status(checkout)
             self.assertLess(time.monotonic() - started, .4)
         finally:
-            timer.join()
+            release.set()
+            worker.join(2)
+        self.assertFalse(worker.is_alive())
 
     def test_native_smart_git_fetch_over_real_fixture_tls(self):
         import http.client

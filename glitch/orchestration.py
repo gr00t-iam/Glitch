@@ -65,8 +65,8 @@ class AgentCoordinator:
             # acquisitions racing a destructive DB mutation. No human wait here.
             for resources in (self.resources, SHARED_RESOURCES):
                 stack.enter_context(resources.guard)
-                locks = [resources.desktop] + [resources.workspaces.setdefault(
-                    os.path.normcase(os.path.realpath(workspace)), threading.Lock()) for workspace in set(workspaces)]
+                resources.require_idle(workspaces)
+                locks = [resources.desktop] + [resources.workspace_lock(workspace) for workspace in set(workspaces)]
                 for lock in locks:
                     if not lock.acquire(blocking=False):
                         raise ValueError('Wait for shared resource operations to finish before removing history.')

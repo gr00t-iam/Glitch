@@ -17,7 +17,7 @@ PATHS = {'type': 'array', 'items': STRING, 'minItems': 1, 'maxItems': 100}
 GITHUB_SCHEMAS = [
     schema('github_list_repositories', 'List repositories using a saved GitHub connection ID; secrets stay on host.',
            {'credential_id': STRING}, ('credential_id',)),
-    schema('github_clone_repo', 'Clone the bound GitHub repository into a new child directory after explicit approval.',
+    schema('github_clone_repo', 'Clone the bound repository into an approved child directory for a NEW task. Creates a child conversation and pauses this run; active workspace and sibling runs do not change. The user must select the child conversation before continuing.',
            {'folder': STRING}, ('folder',)),
     schema('github_repo_status', 'Inspect the registered project checkout; no external Git process.', {}),
     schema('github_diff', 'Review explicit paths with complete-source credential redaction.', {'paths': PATHS}, ('paths',)),

@@ -29,7 +29,7 @@ from dulwich.objects import Blob, Commit
 from dulwich.refs import check_ref_format
 from dulwich.repo import Repo
 from glitch.redaction import GITHUB_RESULT, GITHUB_REPOSITORY
-from glitch.resources import SHARED_RESOURCES
+from glitch.resources import SHARED_RESOURCES, ResourceRefusal
 
 API_BYTES = 1024 * 1024
 MAX_PAGES = 10
@@ -309,6 +309,10 @@ class SafeRepo(Repo):
         return None
 
 
+class _HostRefusal(ValueError):
+    """Explicitly host-authored recovery text; never wrap parser/remote strings."""
+
+
 def _local_errors(method):
     @wraps(method)
     def guarded(*args, **kwargs):
@@ -316,6 +320,8 @@ def _local_errors(method):
             return method(*args, **kwargs)
         except (InterruptedError, TimeoutError):
             raise
+        except (_HostRefusal, ResourceRefusal) as error:
+            raise _HostRefusal(args[0].vault.redact(str(error))) from None
         except Exception:
             # Parser/object-store errors can echo file content; never expose their text.
             raise ValueError('Repository inspection failed or was refused; check paths, configuration and size limits.') from None
@@ -331,14 +337,18 @@ class GitHubService:
 
     @contextmanager
     def _bounded_lease(self, workspace, cancel, deadline):
-        timer = threading.Timer(max(0, deadline - time.monotonic()), cancel.set)
+        expired = threading.Event()
+        def expire():
+            expired.set()
+            cancel.set()
+        timer = threading.Timer(max(0, deadline - time.monotonic()), expire)
         timer.daemon = True
         timer.start()
         try:
             with self.resources.lease('GitHub mutation', str(workspace), cancel):
                 yield
         except InterruptedError:
-            if time.monotonic() >= deadline:
+            if expired.is_set() or time.monotonic() >= deadline:
                 raise TimeoutError('Repository inspection exceeded its time limit.') from None
             raise
         finally:
@@ -385,11 +395,11 @@ class GitHubService:
     def connection(self, workspace):
         connection = self.vault.store.github_connection(workspace)
         if not connection:
-            raise ValueError('Bind this project to a validated GitHub connection in Settings first.')
+            raise _HostRefusal('Bind this project to a validated GitHub connection in Settings first.')
         names(connection['owner'], connection['name'])
         branch(connection['default_branch'])
         if self._credential_version(connection['credential_id']) != connection['credential_version']:
-            raise ValueError('GitHub credential changed; validate and bind the project again.')
+            raise _HostRefusal('GitHub credential changed; validate and bind the project again.')
         return connection
 
     @staticmethod
@@ -397,10 +407,10 @@ class GitHubService:
         config = repo.get_config()
         url = config.get((b'remote', b'origin'), b'url').decode('ascii')
         if safe_remote(url) != (connection['owner'], connection['name']):
-            raise ValueError('Checkout origin does not match the bound GitHub repository.')
+            raise _HostRefusal('Checkout origin does not match the bound GitHub repository.')
         remotes = [s for s in config.sections() if s[0].lower() == b'remote']
         if remotes != [(b'remote', b'origin')]:
-            raise ValueError('Publishing requires a single canonical origin remote.')
+            raise _HostRefusal('Publishing requires a single canonical origin remote.')
         return url
 
     def _refs(self, url, payload, cancel, deadline):
@@ -426,16 +436,16 @@ class GitHubService:
     def _branch_permission(self, connection, value, refs, payload, cancel, deadline):
         ref = branch(value)
         if value == connection['default_branch']:
-            raise ValueError('Publishing to the default branch is disabled.')
+            raise _HostRefusal('Publishing to the default branch is disabled.')
         prefix = f"/repos/{connection['owner']}/{connection['name']}"
         repository = self._repository(self._get(prefix, payload, cancel, deadline))
         if (repository['default_branch'] != connection['default_branch'] or
                 repository['full_name'] != f"{connection['owner']}/{connection['name']}"):
-            raise ValueError('GitHub repository binding changed; validate and bind again.')
+            raise _HostRefusal('GitHub repository binding changed; validate and bind again.')
         data = self._get(prefix + '/branches/' + quote(value, safe=''), payload, cancel, deadline,
                          missing=ref not in refs)
         if data is not None and (not isinstance(data, dict) or data.get('protected') is not False):
-            raise ValueError('Protected branch or unverified branch protection refused.')
+            raise _HostRefusal('Protected branch or unverified branch protection refused.')
 
     def _clean(self, data):
         # latin-1 also preserves ASCII credential bytes in otherwise binary files.
@@ -447,12 +457,12 @@ class GitHubService:
         if any(self.vault.redact(text) != text or re.search(
                 r'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|(?i:password|api[_-]?key|secret|token)\s*[:=]\s*["\']?[^\s"\']{8,}',
                 text) for text in texts):
-            raise ValueError('Detected credential content refused; no values are disclosed.')
+            raise _HostRefusal('Detected credential content refused; no values are disclosed.')
 
     def _fingerprint(self, root, repo, connection, cancel, deadline):
         head, original, staged = self._snapshots(repo, cancel, deadline)
-        records, total = [], 0
-        for path in sorted(self._scan(root, cancel=cancel, deadline=deadline)):
+        records, total, nested = [], 0, []
+        for path in sorted(self._scan(root, cancel=cancel, deadline=deadline, nested=nested)):
             check(cancel, deadline)
             name = path.relative_to(root).as_posix()
             file_path(name)
@@ -462,6 +472,9 @@ class GitHubService:
                 raise ValueError('Review byte limit reached.')
             info = path.stat()
             records.append((name, digest(data), info.st_mode, info.st_dev, info.st_ino))
+        for path in nested:
+            info = path.stat()
+            records.append(('nested_checkout', path.relative_to(root).as_posix(), info.st_dev, info.st_ino))
         for name in ('HEAD', 'index', 'config', 'packed-refs'):
             path = root / '.git' / name
             records.append(('.git/' + name, digest(bounded_read(path, API_BYTES)) if path.exists() else None))
@@ -476,13 +489,24 @@ class GitHubService:
     def _file_data(self, root, name):
         protected_path(name)
         self._clean(name.encode())
-        path = no_links(root.joinpath(*file_path(name)))
+        path = self._repository_path(root, name)
         if path.is_dir():
             raise ValueError('Select explicit files, not directories.')
         data = bounded_read(path, MAX_FILE_BYTES) if path.exists() else None
         if data is not None:
             self._clean(data)
         return path, data
+
+    @staticmethod
+    def _repository_path(root, name):
+        path = no_links(root.joinpath(*file_path(name)))
+        for directory in path.parents:
+            if directory == root:
+                break
+            if os.path.lexists(directory / '.git'):
+                no_links(directory / '.git')
+                raise _HostRefusal('Selected path belongs to a nested checkout; select that project for a new task.')
+        return path
 
     def _commit_scan(self, repo, sha, cancel, deadline):
         """Scan history, not only selected working bytes: a prior commit also travels."""
@@ -554,20 +578,25 @@ class GitHubService:
                 preview = {'repository': f"{connection['owner']}/{connection['name']}",
                            'workspace': str(root), 'head': head, 'current_head': head, 'fingerprint': fingerprint,
                            'operation': name, **args}
+                if name == 'github_clone_repo':
+                    destination = no_links(root / args['folder'])
+                    self._clean(str(destination).encode())
+                    preview.update(clone_destination=str(destination), continuation_required=True,
+                        continuation='Current run keeps its workspace and pauses after clone. Select the new child conversation for a new task.')
                 if name != 'github_clone_repo':
                     value = args.get('branch', args.get('head'))
                     self._branch_permission(connection, value, refs, payload, cancel, deadline)
                 if name in ('github_create_branch', 'github_commit_and_push'):
                     if original != staged:
-                        raise ValueError('Preexisting staged changes are ambiguous; review or unstage them first.')
+                        raise _HostRefusal('Preexisting staged changes are ambiguous; review or unstage them first.')
                     if not head:
-                        raise ValueError('An initial repository commit is required.')
+                        raise _HostRefusal('An initial repository commit is required.')
                 if name == 'github_create_branch':
                     ref = branch(args['branch'])
                     for path, (sha, _) in staged.items():
                         local = no_links(root.joinpath(*file_path(path)))
                         if not local.is_file() or Blob.from_string(bounded_read(local, MAX_FILE_BYTES)).id != sha:
-                            raise ValueError('Tracked working files must be clean before changing branches.')
+                            raise _HostRefusal('Tracked working files must be clean before changing branches.')
                     incoming = refs.get(ref)
                     if incoming:
                         client = self.git_factory(url, payload, cancel, deadline)
@@ -575,27 +604,27 @@ class GitHubService:
                             fetched = client.fetch(url, repo, protocol_version=1, ref_prefix=[ref],
                                                    progress=lambda _: check(cancel, deadline))
                             if fetched.refs.get(ref) != incoming:
-                                raise ValueError('Remote changed during fetch; review again.')
+                                raise _HostRefusal('Remote changed during fetch; review again.')
                         finally:
                             if hasattr(client, 'close'):
                                 client.close()
                         old = repo.refs[ref] if ref in repo.refs else None
                         if old and not self._ancestor(repo, old, incoming, cancel, deadline):
-                            raise ValueError('Divergent feature branch refused; no reset, rebase or merge.')
+                            raise _HostRefusal('Divergent feature branch refused; no reset, rebase or merge.')
                         self._commit_scan(repo, incoming, cancel, deadline)
                         entries = self._branch_entries(root, repo, incoming, original, cancel, deadline)
                         preview.update(target_head=incoming.decode(), paths=sorted(original.keys() | entries.keys()),
                                        diff=self._branch_diff(root, repo, original, entries, cancel, deadline))
                     elif ref in repo.refs:
-                        raise ValueError('Local branch exists without a matching remote; choose a new feature branch.')
+                        raise _HostRefusal('Local branch exists without a matching remote; choose a new feature branch.')
                 if name == 'github_commit_and_push':
                     if repo.refs.read_ref(b'HEAD') != b'ref: ' + branch(args['branch']):
-                        raise ValueError('Selected publishing branch must be the current branch.')
+                        raise _HostRefusal('Selected publishing branch must be the current branch.')
                     self._clean((args['title'] + '\n\n' + args['body']).encode())
                     settings = self.vault.store.settings()
                     author = settings['github_author_name'] + ' <' + settings['github_author_email'] + '>'
                     if not settings['github_author_name'] or not settings['github_author_email']:
-                        raise ValueError('Save the GitHub author name and email in Settings first.')
+                        raise _HostRefusal('Save the GitHub author name and email in Settings first.')
                     self._clean(author.encode())
                     preview['author'] = author
                     self._commit_scan(repo, head.encode(), cancel, deadline)
@@ -604,7 +633,7 @@ class GitHubService:
                                 receipt['request_hash'] == digest(json.dumps(args, sort_keys=True).encode()))
                     baseline = refs.get(branch(args['branch']), refs.get(branch(connection['default_branch'])))
                     if head.encode() != baseline and not matching:
-                        raise ValueError('Unreviewed local commits exist; only a matching retained publication can be retried.')
+                        raise _HostRefusal('Unreviewed local commits exist; only a matching retained publication can be retried.')
                     review_original = original
                     if matching:
                         commit = repo.object_store[head.encode()]
@@ -618,9 +647,9 @@ class GitHubService:
                 if name == 'github_create_pull_request':
                     branch(args['base'])
                     if args['base'] == args['head'] or branch(args['base']) not in refs:
-                        raise ValueError('Choose a distinct existing base branch.')
+                        raise _HostRefusal('Choose a distinct existing base branch.')
                     if refs.get(branch(args['head'])) != (head or '').encode():
-                        raise ValueError('PR head must match the current published local commit.')
+                        raise _HostRefusal('PR head must match the current published local commit.')
                     self._clean((args['title'] + '\n\n' + args['body']).encode())
                     self._commit_scan(repo, head.encode(), cancel, deadline)
                 return PublicationReview(name, json.dumps(args, sort_keys=True), json.dumps(connection, sort_keys=True),
@@ -722,28 +751,33 @@ class GitHubService:
             for line in lines:
                 used += len(line.encode())
                 if used > MAX_DIFF_BYTES:
-                    raise ValueError('Complete approval diff exceeds its limit; select fewer paths.')
+                    raise _HostRefusal('Complete approval diff exceeds its limit; select fewer paths.')
                 output.append(line)
         return ''.join(output)
 
     def _recheck(self, root, repo, review, cancel, deadline):
         connection = self.connection(root)
         if json.dumps(connection, sort_keys=True) != review.connection:
-            raise ValueError('Project binding changed while approval was pending.')
+            raise _HostRefusal('Project binding changed while approval was pending.')
         url = self._remote(repo, connection)
         fingerprint, head, original, staged = self._fingerprint(root, repo, connection, cancel, deadline)
         if fingerprint != review.fingerprint:
-            raise ValueError('Repository HEAD, index or file bytes changed; review and approve again.')
+            raise _HostRefusal('Repository HEAD, index or file bytes changed; review and approve again.')
         payload = self._payload(connection['credential_id'])
         refs = self._refs(url, payload, cancel, deadline)
         if tuple(sorted(refs.items())) != review.remote_refs:
-            raise ValueError('Remote refs changed while approval was pending; review again.')
+            raise _HostRefusal('Remote refs changed while approval was pending; review again.')
         args = json.loads(review.arguments)
         if review.name != 'github_clone_repo':
             self._branch_permission(connection, args.get('branch', args.get('head')), refs, payload, cancel, deadline)
-        # Network checks do not excuse a local race during those checks.
+        # Permission requests are another network interval. Check refs/binding
+        # again after them before the final local fingerprint and mutation.
+        if tuple(sorted(self._refs(url, payload, cancel, deadline).items())) != review.remote_refs:
+            raise _HostRefusal('Remote refs changed during the final permission check; review again.')
+        if json.dumps(self.connection(root), sort_keys=True) != review.connection:
+            raise _HostRefusal('Project binding changed during the final permission check; review again.')
         if self._fingerprint(root, repo, connection, cancel, deadline)[0] != review.fingerprint:
-            raise ValueError('Repository changed during the final remote check; review again.')
+            raise _HostRefusal('Repository changed during the final remote check; review again.')
         check(cancel, deadline)
         return connection, payload, url, refs, head, original, staged
 
@@ -753,16 +787,25 @@ class GitHubService:
         args = json.loads(review.arguments)
         if review.name == 'github_clone_repo':
             connection = json.loads(review.connection)
-            def before():
+            # Hold the approved parent scope through clone and child registration.
+            # The clone's nested lease is reentrant and never spans human review.
+            with self._bounded_lease(workspace, cancel, deadline):
                 root, repo = self._open(workspace, cancel, deadline)
                 try:
                     self._recheck(root, repo, review, cancel, deadline)
                 finally:
                     repo.close()
-            result = self.clone(connection['credential_id'], connection['owner'], connection['name'],
-                workspace, args['folder'], cancel, lease_workspace=workspace, before=before)
-            self.vault.store.bind_github(result['workspace'], connection)
-            return result
+                destination = no_links(root / args['folder'])
+                result = self.clone(connection['credential_id'], connection['owner'], connection['name'],
+                    root, args['folder'], cancel, lease_workspace=root)
+                result.update(active_workspace=str(root), clone_workspace=str(destination), continuation_required=True,
+                    message='Clone created for a new task. Active workspace is unchanged; select the new child conversation before continuing.')
+                try:
+                    result.update(self.vault.store.register_github_clone(destination, connection))
+                except Exception:
+                    result.update(ok=False, clone_retained=True,
+                        error='Clone retained, but child task registration failed. Select the cloned folder through the native picker before continuing.')
+                return result
         with self._bounded_lease(workspace, cancel, deadline):
             root, repo = self._open(workspace, cancel, deadline)
             try:
@@ -783,7 +826,7 @@ class GitHubService:
                     repo.refs.set_symbolic_ref(b'HEAD', ref)
                     return {'ok': True, 'branch': args['branch'], 'head': head}
                 if review.name == 'github_create_pull_request':
-                    return self._pull_request(connection, args, payload, cancel, deadline)
+                    return self._pull_request(root, repo, review, connection, args, payload, cancel, deadline)
                 return self._publish(root, repo, connection, payload, url, refs, head, args, review, cancel, deadline)
             finally:
                 repo.close()
@@ -810,13 +853,13 @@ class GitHubService:
                 index[key] = index_entry_from_stat(path.stat(), blob.id, prior.mode if prior else 0o100644)
         retry = receipt and receipt['request_hash'] == request_hash and receipt['sha'] == head
         if not changed and not retry:
-            raise ValueError('No selected changes and no matching retained commit to retry.')
+            raise _HostRefusal('No selected changes and no matching retained commit to retry.')
         old_remote = refs.get(ref)
         if old_remote and not self._ancestor(repo, old_remote, head.encode(), cancel, deadline):
-            raise ValueError('Remote divergence refused; only fast-forward publishing is allowed.')
+            raise _HostRefusal('Remote divergence refused; only fast-forward publishing is allowed.')
         if changed:
             if receipt and receipt['sha'] == head and old_remote != head.encode():
-                raise ValueError('A retained unpublished commit exists; retry it before editing these paths.')
+                raise _HostRefusal('A retained unpublished commit exists; retry it before editing these paths.')
             commit = Commit()
             commit.tree = index.commit(repo.object_store)
             commit.parents = [head.encode()]
@@ -889,48 +932,101 @@ class GitHubService:
                 client.close()
         return {'ok': True, 'head': head, 'branch': args['branch']}
 
-    def _pull_request(self, connection, args, payload, cancel, deadline):
+    def _pull_request(self, root, repo, review, connection, args, payload, cancel, deadline):
         prefix = f"/repos/{connection['owner']}/{connection['name']}/pulls"
         query = urlencode({'state': 'all', 'head': connection['owner'] + ':' + args['head'],
                            'base': args['base'], 'per_page': 100}, quote_via=quote)
-        def search():
+        approved_refs = dict(review.remote_refs)
+        def revalidate():
+            return self._recheck(root, repo, review, cancel, deadline)[1]
+
+        def search(expected=None):
             data = self._get(prefix + '?' + query, payload, cancel, deadline)
             if not isinstance(data, list) or len(data) >= 100:
-                raise ValueError('GitHub PR search result limit or invalid data.')
+                raise _HostRefusal('GitHub PR search result limit or invalid data.')
+            match = None
             for item in data:
-                if self._matching_pr(item, connection, args):
-                    return self._pr_result(item, connection)
-            return None
+                identity = self._pr_identity(item, connection)
+                if not self._pr_branches(item, connection, args) or item.get('state') not in ('open', 'closed'):
+                    raise _HostRefusal('GitHub returned inconsistent PR repository or branch identity.')
+                if item['state'] == 'closed':
+                    continue
+                if not self._matching_pr(item, connection, args, approved_refs):
+                    raise _HostRefusal('GitHub PR lookup returned stale head/base state; refresh and review again.')
+                if expected is None or identity == expected:
+                    if match is not None:
+                        raise _HostRefusal('GitHub returned ambiguous matching open PRs; inspect the repository.')
+                    match = item
+            return match
+
         existing = search()
+        # A lookup is a network interval, not a frozen-ref reservation. Validate
+        # after it, immediately before POST or reuse of an existing open PR.
+        payload = revalidate()
         if existing:
-            return existing
+            return self._pr_result(existing, connection)
         check(cancel, deadline)
+        data, expected = None, None
+        problem = 'PR response was lost; inspect GitHub before retrying.'
         try:
             data = self._get(prefix, payload, cancel, deadline, body=args)
-            if not self._matching_pr(data, connection, args):
-                raise ValueError('GitHub returned mismatched PR data.')
+            expected = self._pr_identity(data, connection)
+            if not self._matching_pr(data, connection, args, approved_refs):
+                raise _HostRefusal('GitHub returned a terminal or mismatched PR; creation outcome is uncertain.')
+            revalidate()
             return self._pr_result(data, connection)
+        except (InterruptedError, TimeoutError):
+            raise
+        except _HostRefusal as error:
+            problem = str(error)
         except Exception:
             check(cancel, deadline)
-            existing = search()
-            if existing:
-                return existing
-            return {'ok': False, 'error': 'PR creation failed or response was lost; matching head/base will be searched before retry.'}
+        try:
+            existing = search(expected)
+            revalidate()
+            # A received response with invalid identity cannot be attributed to
+            # a different PR found later. A lost response has no known identity.
+            if existing and (data is None or expected is not None):
+                return self._pr_result(existing, connection)
+        except (InterruptedError, TimeoutError):
+            raise
+        except _HostRefusal as error:
+            problem = str(error)
+        except Exception:
+            check(cancel, deadline)
+        return {'ok': False, 'uncertain_creation': True,
+                'error': 'PR request may have reached GitHub. ' + problem}
 
     @staticmethod
-    def _matching_pr(item, connection, args):
+    def _pr_branches(item, connection, args):
         full = f"{connection['owner']}/{connection['name']}"
         return (isinstance(item, dict) and all(isinstance(item.get(side), dict) and
             item[side].get('ref') == args[side] and isinstance(item[side].get('repo'), dict) and
             item[side]['repo'].get('full_name') == full for side in ('head', 'base')))
 
     @staticmethod
-    def _pr_result(item, connection):
-        number = item.get('number')
+    def _matching_pr(item, connection, args, approved_refs):
+        return (GitHubService._pr_branches(item, connection, args) and item.get('state') == 'open' and
+                item.get('merged') is not True and item.get('closed_at') is None and all(
+                    item[side].get('sha') == approved_refs[branch(args[side])].decode()
+                    for side in ('head', 'base')))
+
+    @staticmethod
+    def _pr_identity(item, connection):
+        if not isinstance(item, dict):
+            raise _HostRefusal('GitHub returned invalid PR identity.')
+        identifier, number = item.get('id'), item.get('number')
         url = f"https://github.com/{connection['owner']}/{connection['name']}/pull/{number}"
-        if type(number) is not int or number < 1 or item.get('html_url') != url:
-            raise ValueError('GitHub returned invalid PR identity.')
-        return {'ok': True, 'number': number, 'url': url}
+        if (type(identifier) is not int or identifier < 1 or type(number) is not int or
+                number < 1 or item.get('html_url') != url):
+            raise _HostRefusal('GitHub returned invalid PR identity.')
+        return identifier, number, url
+
+    @staticmethod
+    def _pr_result(item, connection):
+        identifier, number, url = GitHubService._pr_identity(item, connection)
+        return {'ok': True, 'number': number, 'url': url, 'pr_id': identifier, 'pr_state': 'open',
+                'head': item['head']['sha']}
 
     def _get(self, endpoint, payload, cancel, deadline, *, body=None, missing=False):
         check(cancel, deadline)
@@ -939,38 +1035,37 @@ class GitHubService:
                                   self.http(endpoint, payload, cancel, deadline, body=body))
             check(cancel, deadline)
             if code == 401:
-                raise ValueError('GitHub token is invalid or expired; replace the saved token.')
+                raise _HostRefusal('GitHub token is invalid or expired; replace the saved token.')
             if code in (403, 429):
                 limited = code == 429 or any(k.lower() == 'x-ratelimit-remaining' and str(v) == '0'
                                            for k, v in headers.items()) or any(k.lower() == 'retry-after' for k in headers)
-                raise ValueError('GitHub rate limit reached; retry later.' if limited else
+                raise _HostRefusal('GitHub rate limit reached; retry later.' if limited else
                                  'GitHub access denied. Check token permissions and organization approval.')
             if code == 404:
                 if missing:
                     return None
-                raise ValueError('GitHub repository or account unavailable; check access and spelling.')
+                raise _HostRefusal('GitHub repository or account unavailable; check access and spelling.')
             if 300 <= code < 400:
-                raise ValueError('GitHub redirect refused. Select the canonical repository.')
+                raise _HostRefusal('GitHub redirect refused. Select the canonical repository.')
             if code != (201 if body is not None else 200):
-                raise ValueError('GitHub service returned an unsuccessful response.')
+                raise _HostRefusal('GitHub service returned an unsuccessful response.')
             if len(json.dumps(data, allow_nan=False).encode()) > API_BYTES:
-                raise ValueError('GitHub response exceeded its size limit.')
+                raise _HostRefusal('GitHub response exceeded its size limit.')
             return data
         except InterruptedError:
             raise
         except ssl.SSLError:
-            raise ValueError('GitHub TLS verification failed. Check the trusted CA.') from None
+            raise _HostRefusal('GitHub TLS verification failed. Check the trusted CA.') from None
         except (TimeoutError, socket.timeout):
             check(cancel, deadline)
-            raise ValueError('GitHub request timed out.') from None
-        except ValueError as error:
-            # Only host-authored messages are exposed; JSON parser errors may echo responses.
-            if str(error).startswith('GitHub'):
-                raise ValueError(str(error)) from None
-            raise ValueError('GitHub returned invalid response data.') from None
+            raise _HostRefusal('GitHub request timed out.') from None
+        except _HostRefusal:
+            raise
+        except ValueError:
+            raise _HostRefusal('GitHub returned invalid response data.') from None
         except Exception:
             check(cancel, deadline)
-            raise ValueError('GitHub connection failed. Check network and certificate trust.') from None
+            raise _HostRefusal('GitHub connection failed. Check network and certificate trust.') from None
 
     @staticmethod
     def _repository(data):
@@ -1150,7 +1245,7 @@ class GitHubService:
         index.write()
 
     @staticmethod
-    def _scan(root, *, cancel, deadline, metadata=False):
+    def _scan(root, *, cancel, deadline, metadata=False, nested=None):
         """Bound traversal and reject reparse points before Dulwich reads local metadata."""
         no_links(root)
         count = 0
@@ -1166,6 +1261,12 @@ class GitHubService:
                 count += 1
                 if count > MAX_FILES:
                     raise ValueError('Repository entry limit reached.')
+                if not metadata and name in dirs and os.path.lexists(path / '.git'):
+                    no_links(path / '.git')
+                    dirs.remove(name)
+                    if nested is not None:
+                        nested.append(path)
+                    continue
                 if path.is_file():
                     files.append(path)
         return files
@@ -1230,7 +1331,8 @@ class GitHubService:
                         raise ValueError('Project binding changed before repository inspection.')
                     self._remote(repo, connection)
                 head, original, staged = self._snapshots(repo, cancel, deadline)
-                files = self._scan(root, cancel=cancel, deadline=deadline)
+                nested = []
+                files = self._scan(root, cancel=cancel, deadline=deadline, nested=nested)
                 changes = {'add': [], 'delete': [], 'modify': []}
                 for name in sorted(original.keys() | staged.keys()):
                     if original.get(name) != staged.get(name):
@@ -1271,7 +1373,8 @@ class GitHubService:
                     del values[budget:]
                     budget -= len(values)
                 return self.vault.redact({'ok': True, 'head': head, 'staged': changes, 'unstaged': unstaged,
-                                          'untracked': untracked, 'truncated': truncated}, GITHUB_RESULT)
+                    'untracked': untracked, 'truncated': truncated,
+                    'nested_repositories': [path.relative_to(root).as_posix() for path in nested]}, GITHUB_RESULT)
             finally:
                 repo.close()
 
@@ -1301,7 +1404,7 @@ class GitHubService:
                 for name in dict.fromkeys(paths):
                     check(cancel, deadline)
                     display_name = self.vault.redact(name)
-                    path = no_links(root.joinpath(*file_path(name)))
+                    path = self._repository_path(root, name)
                     if path.is_dir():
                         raise ValueError('Select explicit files, not directories.')
                     try:

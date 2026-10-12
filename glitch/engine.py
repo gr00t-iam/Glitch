@@ -4,6 +4,7 @@ import json
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from glitch.monitor import TriggerMonitor
 from glitch.artifacts import ArtifactEvidence
@@ -72,7 +73,8 @@ class AgentEngine:
     def _approve(self, action, payload):
         if action in {'github_clone_repo', 'github_create_branch', 'github_commit_and_push', 'github_create_pull_request'}:
             resources = self.coordinator.resources if self.coordinator else SHARED_RESOURCES
-            with resources.human_review(self.cancelled):
+            workspace = self.store.session(self.running_session)['workspace']
+            with resources.human_review(self.cancelled, workspace=workspace):
                 return self._approve_action(action, payload)
         return self._approve_action(action, payload)
 
@@ -152,7 +154,9 @@ class AgentEngine:
                     'GitHub mutations always require explicit destination review, even in Full Access. '
                     'Available tools: ' + json.dumps(TOOL_SCHEMAS + COMPUTER_SCHEMAS + SERVICE_SCHEMAS + GITHUB_SCHEMAS + CONTEXT_SCHEMAS + extra))
             def system():
-                parts = [base]
+                parts = [base, '\nActive workspace (frozen for this run): ', (Path(workspace).as_posix(), None),
+                         '\nResolve relative file/Git paths and local browser file URLs against this workspace. '
+                         'A clone does not switch this run or sibling runs. Clone pauses this run; a new user task must select the child conversation.']
                 if self.coordinator:
                     parts += ['\nAssigned role: ', (self.coordinator.runs[self.run_id]['role'], None)]
                 parts += ['\nRegistered credential descriptors (IDs and metadata only; secret retrieval is not a tool):\n',
@@ -246,6 +250,15 @@ class AgentEngine:
                     feedback['images'] = [image]
                     self._emit('capture', 'Approved screenshot captured', {'path': result['capture']})
                 self.store.message(session, 'context', feedback['content'], images=feedback.get('images'))
+                if (tool['name'] == 'github_clone_repo' and result.get('continuation_required') is True and
+                        (result.get('ok') is True or result.get('clone_retained') is True)):
+                    notice = result.get('message') if result.get('ok') else result.get('error')
+                    self.store.message(session, 'assistant', notice)
+                    self._emit('message', 'Glitch', {'text': notice})
+                    self._emit('paused', 'Clone requires a new task; active workspace is unchanged.', {
+                        'workspace': workspace, 'clone_workspace': result['clone_workspace'],
+                        'child_session_id': result.get('child_session_id')})
+                    return
                 trigger = monitor.evaluate(actions)
                 if trigger and settings['mode'] == 'hybrid' and not result.get('denied'):
                     self._audit(settings, prompt, actions, trigger)

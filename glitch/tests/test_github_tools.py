@@ -68,9 +68,12 @@ class PublishingTests(unittest.TestCase):
             return 200, {}, [self.pull] if self.pull else []
         if endpoint.endswith('/pulls') and body:
             self.posts += 1
-            self.pull = {'number': 7, 'html_url': 'https://github.com/fixture/sample/pull/7',
-                         'head': {'ref': body['head'], 'repo': {'full_name': 'fixture/sample'}},
-                         'base': {'ref': body['base'], 'repo': {'full_name': 'fixture/sample'}}}
+            with Repo(self.remote) as repo:
+                head = repo.refs[('refs/heads/' + body['head']).encode()].decode()
+                base = repo.refs[('refs/heads/' + body['base']).encode()].decode()
+            self.pull = {'id': 700, 'number': 7, 'state': 'open', 'html_url': 'https://github.com/fixture/sample/pull/7',
+                         'head': {'ref': body['head'], 'sha': head, 'repo': {'full_name': 'fixture/sample'}},
+                         'base': {'ref': body['base'], 'sha': base, 'repo': {'full_name': 'fixture/sample'}}}
             raise OSError('synthetic lost PR response ' + fixtures.SYNTHETIC)
         raise AssertionError('Unexpected fixture route')
 
@@ -361,15 +364,27 @@ class PublishingTests(unittest.TestCase):
             self.tools.execute('github_create_branch', {'branch': 'feature/stopped'})
         self.cancel.clear()
         lock = next(iter(self.service.resources.workspaces.values()))
-        lock.acquire()
+        owned, release = threading.Event(), threading.Event()
+        def holder():
+            lock.acquire()
+            owned.set()
+            try:
+                release.wait(3)
+            finally:
+                lock.release()
+        worker = threading.Thread(target=holder)
+        worker.start()
+        self.assertTrue(owned.wait(1))
         timer = threading.Timer(.1, self.cancel.set)
         timer.start()
         try:
             with self.assertRaises(InterruptedError):
                 self.tools.execute('github_repo_status', {})
         finally:
-            lock.release()
+            release.set()
+            worker.join(2)
             timer.join()
+        self.assertFalse(worker.is_alive())
 
     def test_source_approval_cap_and_secret_scan_have_no_override(self):
         self.branch()

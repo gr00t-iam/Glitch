@@ -139,6 +139,8 @@
 </dialog>
 <dialog id="approval-dialog"><div class="dialog-header"><div><span class="pill amber">Approval required</span><h2 id="approval-title">Glitch needs your permission</h2></div></div><p class="muted">Review the exact action before Glitch continues.</p>
   <section id="repository-review" hidden>
+    <dl class="repository-details"><dt>Workspace</dt><dd id="review-workspace"></dd></dl>
+    <div id="review-clone-scope" hidden><dl class="repository-details"><dt>Clone destination</dt><dd id="review-destination"></dd><dt>Continuation</dt><dd id="review-continuation"></dd></dl></div>
     <dl class="repository-details"><dt>Repository</dt><dd id="review-repository"></dd><dt>Branch</dt><dd id="review-branch"></dd><dt>HEAD</dt><dd id="review-head"></dd><dt>Fingerprint</dt><dd id="review-fingerprint"></dd><dt>Selected paths</dt><dd id="review-paths"></dd><dt>Author</dt><dd id="review-author"></dd><dt>Message</dt><dd id="review-message"></dd></dl>
     <pre id="review-diff" class="repository-diff" tabindex="0"></pre>
   </section>

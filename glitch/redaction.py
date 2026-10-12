@@ -100,7 +100,10 @@ DESCRIPTOR = fields('name', 'origin', 'saved', id=OPAQUE, created_at=OPAQUE, upd
                     tls=fields('verify', 'custom_ca'))
 GITHUB_REPOSITORY = fields('owner', 'name', 'full_name', 'private', 'default_branch', 'url')
 GITHUB_RESULT = fields('ok', 'error', 'message', 'workspace', 'head', 'diff', 'truncated',
-                       'branch', 'reconciled', 'local_commit_retained', 'denied', 'url', number=OPAQUE,
+                       'branch', 'reconciled', 'local_commit_retained', 'denied', 'url', 'uncertain_creation', number=OPAQUE,
+                       pr_id=OPAQUE, pr_state=enum('open'),
+                       active_workspace=None, clone_workspace=None, continuation_required=None, clone_retained=None,
+                       child_session_id=OPAQUE, child_project_id=OPAQUE, nested_repositories=[None],
                        repositories=[GITHUB_REPOSITORY],
                        credential_id=OPAQUE, repository=GITHUB_REPOSITORY,
                        account=fields('login', id=OPAQUE),
@@ -169,7 +172,8 @@ def approval(value):
         payload = fields('command', 'workspace', 'note')
     elif isinstance(name, str) and name.startswith('github_'):
         payload = arguments(name) | fields('operation', 'repository', 'workspace', 'head', 'diff', 'author',
-            'retained_commit', 'current_head', 'target_head', 'paths', 'branch', 'title', 'body', 'folder', 'base', fingerprint=OPAQUE)
+            'retained_commit', 'current_head', 'target_head', 'paths', 'branch', 'title', 'body', 'folder', 'base',
+            'clone_destination', 'continuation_required', 'continuation', fingerprint=OPAQUE)
     else:
         payload = arguments(name)
     names = enum(*labels, 'Write file', 'Run command')
@@ -194,7 +198,7 @@ def event_payload(kind, name=None):
         'context_refreshed': fields(source_start=OPAQUE, source_end=OPAQUE, prompt_count=OPAQUE),
         'browser': fields(action=frozenset(tool_schema('browser_action')['properties']['action']['enum'])),
         'computer': fields(action=frozenset(tool_schema('desktop_input')['properties']['action']['enum'])),
-        'stopped': {}, 'paused': {},
+        'stopped': {}, 'paused': fields('workspace', 'clone_workspace', child_session_id=OPAQUE),
     }.get(kind)
 
 

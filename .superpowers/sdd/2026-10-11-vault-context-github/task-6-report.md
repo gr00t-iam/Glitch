@@ -70,3 +70,43 @@ Interpreter for every run: `C:/Users/jrmym/Documents/Ultimate PWA Harness/.venv-
 ## Commit Boundary
 
 Stage only Task 6 source/tests/UI and this report. Leave controller ledger and other task artifacts unchanged. Local commit only; no push, merge, release or build. Final commit identity and clean working-tree status are reported in the completion response.
+
+## Fix Round 1 (2026-10-12)
+
+Base: `791ddbac36e1a6a184d7e477290831111d69162a`. Addressed the four Important findings and Minor safe-diagnostics finding in `task-6-review.md`; no additional feature or review expansion.
+
+- PR creation rechecks approved HEAD, remote head/base refs, default/protected branch policy, credential/project binding and local/index fingerprints after lookup and immediately before POST. Final refs/binding checks follow the permission network interval. Uncertain-response lookup also rechecks before reuse; no blind second POST.
+- Success requires a canonical open PR with exact approved head/base SHAs, repository and branch identities. Closed/stale/noncanonical responses cannot report success. Known response identity must match reconciliation identity.
+- Ancestor/descendant workspace scopes conflict across admitted file/shell/Git mutations and pending human review. Disjoint siblings remain independent; nested leases restore outer ownership, waiters clean up on cancellation, and overlapping queue fairness is preserved. Human review holds policy intent, not a workspace lease.
+- Clone ruling: do not automatically adopt a new root. Clone stays inside the exact approved parent destination, registers a bound child conversation atomically, and pauses the current run before another model/tool call. The user explicitly selects the child for a new task. Parent/sibling sessions retain their workspace; restarted child tasks use the child root for file/Git/browser paths and system context. Parent inspection excludes nested checkout contents and refuses staging/diff of child paths. Registration failure retains the clone with an honest recovery result rather than claiming adoption.
+- Typed host refusals retain safe recovery guidance. Arbitrary remote/parser exception strings remain suppressed; synthetic secret-bearing diagnostics are not echoed.
+
+### Focused RED/GREEN Evidence
+
+All Python commands used `C:/Users/jrmym/Documents/Ultimate PWA Harness/.venv-glitch/Scripts/python.exe`, `-B`, and explicit workdir `C:/Users/jrmym/.codex/worktrees/glitch-vault-context-github/Ultimate PWA Harness`.
+
+Incremental RED then GREEN runs: diagnostics 2 failures -> 2 pass; PR suite 10 cases with 12 failing subtests -> 10 pass; hierarchical scope regressions 8 cases with 10 failing subtests -> 10 affected cases pass; clone flow 1 failure/2 errors -> 3 pass. A Windows drive-case assertion was normalized without changing authority checks. Existing wait fixtures were changed to hold leases from another thread because same-thread acquisition is now intentionally reentrant. A timer-boundary cancellation classification failure was fixed using explicit expiry state. Human-review diagnostics/own-claim guards failed first, then the 26-case module passed. Unrelated-owned-scope fairness failed first, then all 9 scope cases passed. Final permission-network binding/ref drift failed in 2 subtests before the last recheck fix. One transient indentation error during editing was repaired before verification.
+
+Final exact focused regression command:
+
+```powershell
+& 'C:/Users/jrmym/Documents/Ultimate PWA Harness/.venv-glitch/Scripts/python.exe' -B -m unittest glitch.tests.test_github_task6_review -q
+```
+
+Output: `Ran 28 tests in 14.052s` / `OK`; exit 0.
+
+Final exact affected compatibility command:
+
+```powershell
+& 'C:/Users/jrmym/Documents/Ultimate PWA Harness/.venv-glitch/Scripts/python.exe' -B -m unittest glitch.tests.test_resources glitch.tests.test_github_tools.PublishingTests.test_pr_lost_response_searches_matching_head_base glitch.tests.test_github_tools.PublishingTests.test_clone_tool_and_persistent_child_binding glitch.tests.test_github_tools.PublishingTests.test_cancel_during_approval_and_resource_wait glitch.tests.test_github_service.GitHubTests.test_status_lease_wait_is_bounded glitch.tests.test_github_tools.PublishingTests.test_full_access_still_requires_genuine_publishing_approval glitch.tests.test_github_tools.PublishingTests.test_human_review_rejects_agent_input_and_commands_without_holding_leases glitch.tests.test_github_tools.PublishingTests.test_git_human_review_waits_for_existing_automation_then_releases_policy glitch.tests.test_history_lifecycle.HistoryLifecycleTests.test_resource_lease_blocks_delete glitch.tests.test_github_tools.PublishingTests.test_failed_push_retains_local_commit_and_retry_does_not_duplicate glitch.tests.test_github_tools.PublishingTests.test_approval_rechecks_index_head_remote_and_binding glitch.tests.test_github_tools.PublishingTests.test_sibling_file_write_waits_until_publish_lease_is_released -q
+```
+
+Output: `Ran 13 tests in 7.318s` / `OK`; exit 0. Fixtures used bounded temporary repositories, mock HTTP/local native Dulwich transports, fake model responses and mocked browser/computer integration. Engine-level clone pause and restarted child scope were tested, not only GitHubTools units.
+
+Final `git diff --cached --check`: exit 0, no output. `git diff --cached --stat` confirmed exactly 13 scoped source/test/UI/report files; no executable, data, model or controller ledger. Initial explicit `git add` emitted ignored-directory advice despite staging the already-tracked report; the report-only update was then staged explicitly with `-f`.
+
+### Remaining Limits And Handoff
+
+Remote PR checks are point-in-time; GitHub's ref-based POST is not an atomic compare-and-swap. Uncertain results remain explicitly uncertain when identity/current state cannot be established. Exact base-SHA matching conservatively refuses stale PRs. Shared leases govern admitted Glitch tools, not external processes or an OS sandbox. A retained clone after metadata failure needs explicit native recovery/selection.
+
+No broad suite, fresh native UI/frozen executable run, live account/user-repository call, GPU/cloud inference, build, push or release occurred in this fix round. Earlier report evidence is historical, not rerun evidence. Existing workspace/source proof/executable and controller ledger remain untouched. Fresh controller scoped review and minimal Task 7 packaging/release remain pending; controller handles publication. This round ends with the scoped report and local commit only.

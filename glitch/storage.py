@@ -198,14 +198,30 @@ class Store:
     def bind_github(self, workspace, connection):
         # Host-only validated metadata; callers cannot persist arbitrary response fields.
         with self.lock, self.connect() as db:
-            project = self._register_project(db, workspace)
-            prior = db.execute('SELECT owner,name,default_branch FROM github_connections WHERE project=?', (project,)).fetchone()
-            if prior is not None and tuple(prior) != tuple(connection[key] for key in ('owner', 'name', 'default_branch')):
-                db.execute('DELETE FROM github_publications WHERE project=?', (project,))
-            db.execute('''INSERT OR REPLACE INTO github_connections
-                VALUES(?,?,?,?,?,?)''', (project, connection['credential_id'],
-                connection['credential_version'], connection['owner'], connection['name'],
-                connection['default_branch']))
+            self._bind_github(db, workspace, connection)
+
+    def _bind_github(self, db, workspace, connection):
+        project = self._register_project(db, workspace)
+        prior = db.execute('SELECT owner,name,default_branch FROM github_connections WHERE project=?', (project,)).fetchone()
+        if prior is not None and tuple(prior) != tuple(connection[key] for key in ('owner', 'name', 'default_branch')):
+            db.execute('DELETE FROM github_publications WHERE project=?', (project,))
+        db.execute('''INSERT OR REPLACE INTO github_connections
+            VALUES(?,?,?,?,?,?)''', (project, connection['credential_id'],
+            connection['credential_version'], connection['owner'], connection['name'],
+            connection['default_branch']))
+        return project
+
+    def register_github_clone(self, workspace, connection):
+        """Host-owned clone destination only; no adoption of an existing session."""
+        root = Path(workspace).resolve(strict=True)
+        if not root.is_dir():
+            raise ValueError('Cloned workspace is unavailable.')
+        session = str(uuid.uuid4())
+        with self.lock, self.connect() as db:
+            project = self._bind_github(db, root, connection)
+            db.execute('INSERT INTO sessions(id,workspace,title,project_id) VALUES (?,?,?,?)',
+                       (session, str(root), 'New conversation', project))
+        return {'child_session_id': session, 'child_project_id': project}
 
     def github_publication(self, project, branch):
         with self.lock, self.connect() as db:
